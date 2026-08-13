@@ -1,0 +1,24 @@
+{
+  "id": "route_001",
+  "name": "Warehouse to Office",
+  "start": "START",
+  "destination": "OFFICE",
+  "checkpoints": [
+    "START",
+    "LAB",
+    "STORAGE",
+    "OFFICE"
+  ],
+  "distance": 7.3,
+  "duration": 84,
+  "created": "2026-08-13",
+  "trajectory": [
+    { "x": 0.0, "y": 0.0, "heading": 0.0, "rfid": "START" },
+    { "x": 1.0, "y": 0.0, "heading": 0.0 },
+    { "x": 2.0, "y": 0.0, "heading": 90.0, "rfid": "LAB" },
+    { "x": 2.0, "y": 1.0, "heading": 90.0 },
+    { "x": 2.0, "y": 2.0, "heading": 180.0, "rfid": "STORAGE" },
+    { "x": 1.0, "y": 2.0, "heading": 180.0 },
+    { "x": 0.0, "y": 2.0, "heading": 270.0, "rfid": "OFFICE" }
+  ]
+}

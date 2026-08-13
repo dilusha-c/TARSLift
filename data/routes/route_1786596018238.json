@@ -1,0 +1,93 @@
+{
+  "id": "route_1786596018238",
+  "name": "Warehouse to Office",
+  "start": "START",
+  "destination": "OFFICE",
+  "checkpoints": [
+    "START",
+    "OFFICE"
+  ],
+  "distance": 0.19,
+  "duration": 605,
+  "created": "2026-08-13",
+  "trajectory": [
+    {
+      "x": 0,
+      "y": 0,
+      "heading": 0,
+      "rfid": "START"
+    },
+    {
+      "x": 0.02,
+      "y": 0,
+      "heading": 0,
+      "rfid": "START"
+    },
+    {
+      "x": 0.03,
+      "y": 0,
+      "heading": 0,
+      "rfid": "START"
+    },
+    {
+      "x": 0.05,
+      "y": 0,
+      "heading": 0,
+      "rfid": "START"
+    },
+    {
+      "x": 0.06,
+      "y": 0,
+      "heading": 0,
+      "rfid": "START"
+    },
+    {
+      "x": 0.08,
+      "y": 0,
+      "heading": 11.2,
+      "rfid": "START"
+    },
+    {
+      "x": 0.09,
+      "y": 0.01,
+      "heading": 11.2,
+      "rfid": "START"
+    },
+    {
+      "x": 0.08,
+      "y": 0,
+      "heading": 11.2,
+      "rfid": "START"
+    },
+    {
+      "x": 0.06,
+      "y": 0,
+      "heading": 11.2,
+      "rfid": "START"
+    },
+    {
+      "x": 0.05,
+      "y": 0,
+      "heading": 11.2,
+      "rfid": "START"
+    },
+    {
+      "x": 0.03,
+      "y": -0.01,
+      "heading": 11.2,
+      "rfid": "START"
+    },
+    {
+      "x": 0.02,
+      "y": -0.01,
+      "heading": 11.2,
+      "rfid": "START"
+    },
+    {
+      "x": 0,
+      "y": -0.01,
+      "heading": 11.2,
+      "rfid": "START"
+    }
+  ]
+}

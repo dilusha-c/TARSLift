@@ -1,0 +1,161 @@
+#include "web/websocket.h"
+#include <ArduinoJson.h>
+#include "config.h"
+#include "demo/demo_manager.h"
+#include "system/system_manager.h"
+#include "routes/route_manager.h"
+#include "errors/error_logger.h"
+
+#if ENABLE_WEBSOCKET
+static AsyncWebSocket ws("/ws");
+
+static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
+    if (type == WS_EVT_CONNECT) {
+        Serial.printf("WebSocket: Client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+        // Send initial state
+        broadcastTelemetry();
+    } else if (type == WS_EVT_DISCONNECT) {
+        Serial.printf("WebSocket: Client #%u disconnected\n", client->id());
+    } else if (type == WS_EVT_DATA) {
+        // Handle incoming WebSocket messages if any
+    }
+}
+#endif
+
+void webSocketInit(AsyncWebServer *server) {
+    #if ENABLE_WEBSOCKET
+    ws.onEvent(onWsEvent);
+    server->addHandler(&ws);
+    Serial.println("WebSocket: Registered /ws handler");
+    #endif
+}
+
+void broadcastTelemetry() {
+    #if ENABLE_WEBSOCKET
+    if (ws.count() == 0) return; // No clients connected
+
+    JsonDocument doc;
+    
+    // Mode & Mission States
+    doc["mode"] = (getAGVMode() == MODE_TEACH) ? "TEACH" : ((getAGVMode() == MODE_REPEAT) ? "REPEAT" : "IDLE");
+    
+    AGVState state = getAGVState();
+    String stateStr = "STOPPED";
+    if (state == STATE_RUNNING) stateStr = "RUNNING";
+    else if (state == STATE_PAUSED) stateStr = "PAUSED";
+    else if (state == STATE_RECORDING) stateStr = "RECORDING";
+    else if (state == STATE_COMPLETE) stateStr = "COMPLETE";
+    else if (state == STATE_ERROR) stateStr = "ERROR";
+    doc["state"] = stateStr;
+
+    // Telemetry Sensor Fields
+    TelemetryData tele = getTelemetry();
+    doc["x"] = round(tele.x * 100.0) / 100.0;
+    doc["y"] = round(tele.y * 100.0) / 100.0;
+    doc["heading"] = round(tele.heading * 10.0) / 10.0;
+    doc["speed"] = round(tele.speed * 100.0) / 100.0;
+    doc["rfid"] = tele.rfid;
+
+    // Battery fields matching settings configuration
+    if (sysSettings.battery_monitoring) {
+        doc["battery_enabled"] = true;
+        doc["voltage"] = sysSettings.voltage_monitoring ? String(tele.battery_volt, 1) + " V" : "N/A";
+        doc["current"] = sysSettings.current_monitoring ? String(tele.battery_curr, 2) + " A" : "N/A";
+        
+        if (sysSettings.voltage_monitoring && sysSettings.current_monitoring && sysSettings.power_monitoring) {
+            float powerVal = tele.battery_volt * tele.battery_curr;
+            doc["power"] = String(powerVal, 1) + " W";
+        } else {
+            doc["power"] = "N/A";
+        }
+
+        doc["battery"] = sysSettings.battery_percentage ? String((int)tele.battery_pct) + "%" : "N/A";
+
+        // Status resolution
+        String batStatus = "NORMAL";
+        if (sysSettings.battery_fault_detection && (tele.battery_volt < 5.0f || tele.battery_volt > 15.0f)) {
+            batStatus = "FAULT";
+        } else if (sysSettings.critical_battery_warning && (tele.battery_volt <= sysSettings.critical_voltage || tele.battery_pct <= sysSettings.critical_battery_pct)) {
+            batStatus = "CRITICAL";
+        } else if (sysSettings.low_battery_warning && (tele.battery_volt <= sysSettings.low_voltage || tele.battery_pct <= sysSettings.low_battery_pct)) {
+            batStatus = "LOW";
+        }
+        doc["battery_status"] = batStatus;
+    } else {
+        doc["battery_enabled"] = false;
+        doc["voltage"] = "N/A";
+        doc["current"] = "N/A";
+        doc["power"] = "N/A";
+        doc["battery"] = "N/A";
+        doc["battery_status"] = "DISABLED";
+    }
+
+    // ToF Sensors
+    JsonObject tof = doc.createNestedObject("tof");
+    tof["left"] = tele.tof_left;
+    tof["centre"] = tele.tof_centre;
+    tof["right"] = tele.tof_right;
+
+    // Motor Speeds
+    JsonObject motor = doc.createNestedObject("motor");
+    motor["left_rpm"] = tele.left_rpm;
+    motor["right_rpm"] = tele.right_rpm;
+    motor["target_rpm"] = tele.target_rpm;
+
+    // System Health & Diagnostics
+    SystemHealth health = getSystemHealth();
+    JsonObject healthObj = doc.createNestedObject("health");
+    healthObj["esp32"] = (int)health.esp32;
+    healthObj["stm32"] = (int)health.stm32;
+    healthObj["motor"] = (int)health.motor;
+    healthObj["encoder"] = (int)health.encoder;
+    healthObj["mpu6050"] = (int)health.mpu6050;
+    healthObj["rfid"] = (int)health.rfid;
+    healthObj["tof"] = (int)health.tof;
+    healthObj["battery"] = (int)health.battery;
+    healthObj["uart"] = (int)health.uart;
+
+    // Uptime and Heap
+    doc["uptime"] = getSystemUptimeS();
+    doc["heap"] = getFreeHeap();
+    doc["rssi"] = getWifiRSSI();
+
+    size_t fsTotal = 0, fsUsed = 0;
+    getLittleFSInfo(fsTotal, fsUsed);
+    doc["fs_total"] = fsTotal;
+    doc["fs_used"] = fsUsed;
+
+    // Active Route Information
+    doc["active_route"] = getActiveRouteName();
+    doc["checkpoint_idx"] = getCheckpointIndex();
+    doc["checkpoint_total"] = getTotalCheckpoints();
+    doc["mission_progress"] = round(getMissionProgress());
+
+    // Current Active Error
+    SystemError err = getCurrentError();
+    JsonObject errObj = doc.createNestedObject("active_error");
+    errObj["active"] = err.active;
+    if (err.active) {
+        errObj["timestamp"] = err.timestamp;
+        errObj["source"] = err.source;
+        errObj["code"] = err.code;
+        errObj["description"] = err.description;
+    }
+
+    // Live Web Serial Console log buffer
+    doc["serial_logs"] = getWebSerialLogs();
+
+    // Serialize and broadcast
+    String buffer;
+    serializeJson(doc, buffer);
+    ws.textAll(buffer);
+    #endif
+}
+
+bool isWebSocketClientConnected() {
+    #if ENABLE_WEBSOCKET
+    return ws.count() > 0;
+    #else
+    return false;
+    #endif
+}

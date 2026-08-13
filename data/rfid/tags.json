@@ -1,0 +1,24 @@
+{
+  "tags": [
+    {
+      "uid": "04A7329B6C",
+      "name": "START",
+      "location": "Entry Dock"
+    },
+    {
+      "uid": "04B2187F21",
+      "name": "LAB",
+      "location": "Laboratory Entry"
+    },
+    {
+      "uid": "04C59133A2",
+      "name": "OFFICE",
+      "location": "Office Gate"
+    },
+    {
+      "uid": "04D8421190",
+      "name": "STORAGE",
+      "location": "Storage Bin B"
+    }
+  ]
+}

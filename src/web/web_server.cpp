@@ -1,0 +1,525 @@
+#include "web/web_server.h"
+#include <ESPAsyncWebServer.h>
+#include <LittleFS.h>
+#include <ArduinoJson.h>
+#include "config.h"
+#include "web/websocket.h"
+#include "system/system_manager.h"
+#include "routes/route_manager.h"
+#include "rfid/rfid_manager.h"
+#include "errors/error_logger.h"
+#include "demo/demo_manager.h"
+
+static AsyncWebServer server(80);
+
+// Helper to send CORS headers and JSON response
+static void sendJsonResponse(AsyncWebServerRequest *request, const JsonDocument &doc, int code = 200) {
+    String responseBody;
+    serializeJson(doc, responseBody);
+    AsyncWebServerResponse *response = request->beginResponse(code, "application/json", responseBody);
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    request->send(response);
+}
+
+static void sendSuccessResponse(AsyncWebServerRequest *request, const String &message = "Success") {
+    JsonDocument doc;
+    doc["status"] = "success";
+    doc["message"] = message;
+    sendJsonResponse(request, doc);
+}
+
+static void sendErrorResponse(AsyncWebServerRequest *request, const String &error, int code = 400) {
+    JsonDocument doc;
+    doc["status"] = "error";
+    doc["message"] = error;
+    sendJsonResponse(request, doc, code);
+}
+
+void webServerInit() {
+    // ------------------------------------------------------------------------
+    // OPTIONS Preflight Handler for CORS (Web clients running locally)
+    // ------------------------------------------------------------------------
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    
+    server.on("^.*$", HTTP_OPTIONS, [](AsyncWebServerRequest *request) {
+        AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "");
+        response->addHeader("Access-Control-Max-Age", "86400");
+        request->send(response);
+    });
+
+    // ------------------------------------------------------------------------
+    // REST API ENDPOINTS
+    // ------------------------------------------------------------------------
+
+    // GET /api/status
+    server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        doc["mode"] = (getAGVMode() == MODE_TEACH) ? "TEACH" : ((getAGVMode() == MODE_REPEAT) ? "REPEAT" : "IDLE");
+        AGVState state = getAGVState();
+        String stateStr = "STOPPED";
+        if (state == STATE_RUNNING) stateStr = "RUNNING";
+        else if (state == STATE_PAUSED) stateStr = "PAUSED";
+        else if (state == STATE_RECORDING) stateStr = "RECORDING";
+        else if (state == STATE_COMPLETE) stateStr = "COMPLETE";
+        else if (state == STATE_ERROR) stateStr = "ERROR";
+        doc["state"] = stateStr;
+
+        TelemetryData tele = getTelemetry();
+        doc["x"] = tele.x;
+        doc["y"] = tele.y;
+        doc["heading"] = tele.heading;
+        doc["speed"] = tele.speed;
+        doc["rfid"] = tele.rfid;
+
+        // Battery fields matching settings configuration
+        if (sysSettings.battery_monitoring) {
+            doc["battery_enabled"] = true;
+            doc["voltage"] = sysSettings.voltage_monitoring ? String(tele.battery_volt, 1) + " V" : "N/A";
+            doc["current"] = sysSettings.current_monitoring ? String(tele.battery_curr, 2) + " A" : "N/A";
+            
+            if (sysSettings.voltage_monitoring && sysSettings.current_monitoring && sysSettings.power_monitoring) {
+                float powerVal = tele.battery_volt * tele.battery_curr;
+                doc["power"] = String(powerVal, 1) + " W";
+            } else {
+                doc["power"] = "N/A";
+            }
+
+            doc["battery"] = sysSettings.battery_percentage ? String((int)tele.battery_pct) + "%" : "N/A";
+
+            // Status resolution
+            String batStatus = "NORMAL";
+            if (sysSettings.battery_fault_detection && (tele.battery_volt < 5.0f || tele.battery_volt > 15.0f)) {
+                batStatus = "FAULT";
+            } else if (sysSettings.critical_battery_warning && (tele.battery_volt <= sysSettings.critical_voltage || tele.battery_pct <= sysSettings.critical_battery_pct)) {
+                batStatus = "CRITICAL";
+            } else if (sysSettings.low_battery_warning && (tele.battery_volt <= sysSettings.low_voltage || tele.battery_pct <= sysSettings.low_battery_pct)) {
+                batStatus = "LOW";
+            }
+            doc["battery_status"] = batStatus;
+        } else {
+            doc["battery_enabled"] = false;
+            doc["voltage"] = "N/A";
+            doc["current"] = "N/A";
+            doc["power"] = "N/A";
+            doc["battery"] = "N/A";
+            doc["battery_status"] = "DISABLED";
+        }
+
+        sendJsonResponse(request, doc);
+    });
+
+    // GET /api/routes
+    server.on("/api/routes", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc = listRoutes();
+        sendJsonResponse(request, doc);
+    });
+
+    // GET /api/rfid
+    server.on("/api/rfid", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc = getRFIDTagsJSON();
+        sendJsonResponse(request, doc);
+    });
+
+    // GET /api/errors
+    server.on("/api/errors", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc = getErrorStatistics();
+        String logContent = readLogFile(getTodayLogPath());
+        doc["log"] = logContent;
+        sendJsonResponse(request, doc);
+    });
+
+    // GET /api/system
+    server.on("/api/system", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        doc["uptime"] = getSystemUptimeS();
+        doc["heap"] = getFreeHeap();
+        doc["rssi"] = getWifiRSSI();
+
+        size_t fsTotal = 0, fsUsed = 0;
+        getLittleFSInfo(fsTotal, fsUsed);
+        doc["fs_total"] = fsTotal;
+        doc["fs_used"] = fsUsed;
+
+        SystemHealth health = getSystemHealth();
+        JsonObject healthObj = doc.createNestedObject("health");
+        healthObj["esp32"] = (int)health.esp32;
+        healthObj["stm32"] = (int)health.stm32;
+        healthObj["motor"] = (int)health.motor;
+        healthObj["encoder"] = (int)health.encoder;
+        healthObj["mpu6050"] = (int)health.mpu6050;
+        healthObj["rfid"] = (int)health.rfid;
+        healthObj["tof"] = (int)health.tof;
+        healthObj["battery"] = (int)health.battery;
+        healthObj["uart"] = (int)health.uart;
+
+        sendJsonResponse(request, doc);
+    });
+
+    // POST /api/teach/start
+    server.on("/api/teach/start", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, data, len);
+        if (err) {
+            sendErrorResponse(request, "Invalid JSON payload");
+            return;
+        }
+
+        String name = doc["name"] | "New Route";
+        String start = doc["start"] | "START";
+        String destination = doc["destination"] | "OFFICE";
+        String description = doc["description"] | "";
+
+        if (name.length() < 3) {
+            sendErrorResponse(request, "Route name too short (min 3 chars)");
+            return;
+        }
+
+        if (startTeaching(name, start, destination, description)) {
+            sendSuccessResponse(request, "Teaching started");
+        } else {
+            sendErrorResponse(request, "Failed to start teaching mode");
+        }
+    });
+
+    // POST /api/teach/stop
+    server.on("/api/teach/stop", HTTP_POST, [](AsyncWebServerRequest *request) {
+        if (stopRecordingAndSave()) {
+            sendSuccessResponse(request, "Route saved successfully");
+        } else {
+            sendErrorResponse(request, "Failed to save route");
+        }
+    });
+
+    // POST /api/route/delete
+    server.on("/api/route/delete", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, data, len);
+        if (err) {
+            sendErrorResponse(request, "Invalid JSON payload");
+            return;
+        }
+
+        String routeId = doc["id"] | "";
+        if (routeId == "") {
+            sendErrorResponse(request, "Route ID required");
+            return;
+        }
+
+        if (deleteRoute(routeId)) {
+            sendSuccessResponse(request, "Route deleted");
+        } else {
+            sendErrorResponse(request, "Failed to delete route");
+        }
+    });
+
+    // POST /api/repeat/start
+    server.on("/api/repeat/start", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, data, len);
+        if (err) {
+            sendErrorResponse(request, "Invalid JSON payload");
+            return;
+        }
+
+        String routeId = doc["id"] | "";
+        if (routeId == "") {
+            sendErrorResponse(request, "Route ID required");
+            return;
+        }
+
+        if (startRepeating(routeId)) {
+            sendSuccessResponse(request, "Mission started");
+        } else {
+            sendErrorResponse(request, "Cannot start repeat: Required hardware disabled");
+        }
+    });
+
+    // POST /api/repeat/pause
+    server.on("/api/repeat/pause", HTTP_POST, [](AsyncWebServerRequest *request) {
+        if (pauseRepeating()) {
+            sendSuccessResponse(request, "Mission paused");
+        } else {
+            sendErrorResponse(request, "Failed to pause mission");
+        }
+    });
+
+    // POST /api/repeat/resume
+    server.on("/api/repeat/resume", HTTP_POST, [](AsyncWebServerRequest *request) {
+        if (resumeRepeating()) {
+            sendSuccessResponse(request, "Mission resumed");
+        } else {
+            sendErrorResponse(request, "Failed to resume mission");
+        }
+    });
+
+    // POST /api/repeat/stop
+    server.on("/api/repeat/stop", HTTP_POST, [](AsyncWebServerRequest *request) {
+        if (stopRepeating()) {
+            sendSuccessResponse(request, "Mission stopped");
+        } else {
+            sendErrorResponse(request, "Failed to stop mission");
+        }
+    });
+
+    // POST /api/manual/move
+    server.on("/api/manual/move", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, data, len);
+        if (err) {
+            sendErrorResponse(request, "Invalid JSON payload");
+            return;
+        }
+
+        String direction = doc["direction"] | "STOP";
+        int speed = doc["speed"] | 50;
+
+        if (speed < 10 || speed > 100) {
+            sendErrorResponse(request, "Speed must be between 10% and 100%");
+            return;
+        }
+
+        if (direction != "FORWARD" && direction != "REVERSE" && direction != "LEFT" && direction != "RIGHT" && direction != "STOP") {
+            sendErrorResponse(request, "Invalid movement direction");
+            return;
+        }
+
+        if (direction == "STOP") {
+            handleDemoManualStop();
+        } else {
+            handleDemoManualMove(direction, speed);
+        }
+        sendSuccessResponse(request, "Movement command sent");
+    });
+
+    // POST /api/manual/stop
+    server.on("/api/manual/stop", HTTP_POST, [](AsyncWebServerRequest *request) {
+        handleDemoManualStop();
+        sendSuccessResponse(request, "Stop command sent");
+    });
+
+    // POST /api/rfid/add
+    server.on("/api/rfid/add", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, data, len);
+        if (err) {
+            sendErrorResponse(request, "Invalid JSON payload");
+            return;
+        }
+
+        String uid = doc["uid"] | "";
+        String name = doc["name"] | "";
+        String location = doc["location"] | "";
+
+        if (uid == "" || name == "") {
+            sendErrorResponse(request, "UID and Name are required");
+            return;
+        }
+
+        if (addOrUpdateRFIDTag(uid, name, location)) {
+            sendSuccessResponse(request, "RFID tag registered");
+        } else {
+            sendErrorResponse(request, "Failed to register RFID tag");
+        }
+    });
+
+    // POST /api/rfid/scan
+    server.on("/api/rfid/scan", HTTP_POST, [](AsyncWebServerRequest *request) {
+        triggerRFIDScanSimulation();
+        sendSuccessResponse(request, "RFID scan simulated");
+    });
+
+    // POST /api/rfid/delete
+    server.on("/api/rfid/delete", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, data, len);
+        if (err) {
+            sendErrorResponse(request, "Invalid JSON payload");
+            return;
+        }
+
+        String uid = doc["uid"] | "";
+        if (uid == "") {
+            sendErrorResponse(request, "RFID card UID required");
+            return;
+        }
+
+        if (deleteRFIDTag(uid)) {
+            sendSuccessResponse(request, "RFID tag deleted");
+        } else {
+            sendErrorResponse(request, "Failed to delete RFID tag");
+        }
+    });
+
+    // GET /api/settings
+    server.on("/api/settings", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        doc["test_profile"] = sysSettings.test_profile;
+
+        doc["enable_dashboard"] = sysSettings.enable_dashboard;
+        doc["enable_teach_mode"] = sysSettings.enable_teach_mode;
+        doc["enable_repeat_mode"] = sysSettings.enable_repeat_mode;
+        doc["enable_manual_control"] = sysSettings.enable_manual_control;
+        doc["enable_route_manager"] = sysSettings.enable_route_manager;
+        doc["enable_rfid_manager"] = sysSettings.enable_rfid_manager_flag;
+        doc["enable_error_log"] = sysSettings.enable_error_log;
+        doc["enable_system_info"] = sysSettings.enable_system_info;
+
+        doc["enable_stm32_uart"] = sysSettings.enable_stm32_uart;
+        doc["enable_websocket"] = sysSettings.enable_websocket;
+
+        doc["enable_motor_control"] = sysSettings.enable_motor_control;
+        doc["enable_encoder"] = sysSettings.enable_encoder;
+        doc["enable_mpu6050"] = sysSettings.enable_mpu6050;
+        doc["enable_pid"] = sysSettings.enable_pid;
+
+        doc["rfid_reader"] = sysSettings.rfid_reader;
+        doc["rfid_manager_flag"] = sysSettings.rfid_manager_flag;
+        doc["rfid_checkpoints"] = sysSettings.rfid_checkpoints;
+
+        doc["tof_sensors"] = sysSettings.tof_sensors;
+        doc["left_tof"] = sysSettings.left_tof;
+        doc["centre_tof"] = sysSettings.centre_tof;
+        doc["right_tof"] = sysSettings.right_tof;
+        doc["obstacle_detection"] = sysSettings.obstacle_detection;
+
+        doc["battery_monitoring"] = sysSettings.battery_monitoring;
+        doc["ina219"] = sysSettings.ina219;
+        doc["voltage_monitoring"] = sysSettings.voltage_monitoring;
+        doc["current_monitoring"] = sysSettings.current_monitoring;
+        doc["power_monitoring"] = sysSettings.power_monitoring;
+        doc["battery_percentage"] = sysSettings.battery_percentage;
+        doc["low_battery_warning"] = sysSettings.low_battery_warning;
+        doc["critical_battery_warning"] = sysSettings.critical_battery_warning;
+        doc["battery_fault_detection"] = sysSettings.battery_fault_detection;
+        doc["charging_status"] = sysSettings.charging_status;
+
+        doc["low_voltage"] = sysSettings.low_voltage;
+        doc["critical_voltage"] = sysSettings.critical_voltage;
+        doc["low_battery_pct"] = sysSettings.low_battery_pct;
+        doc["critical_battery_pct"] = sysSettings.critical_battery_pct;
+
+        doc["demo_mode"] = sysSettings.demo_mode;
+        doc["wifi_ssid"] = sysSettings.wifi_ssid;
+        doc["wifi_password"] = sysSettings.wifi_password;
+
+        sendJsonResponse(request, doc);
+    });
+
+    // POST /api/settings
+    server.on("/api/settings", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, data, len);
+        if (err) {
+            sendErrorResponse(request, "Invalid JSON payload");
+            return;
+        }
+
+        if (doc.containsKey("test_profile")) {
+            int prof = doc["test_profile"].as<int>();
+            sysSettings.test_profile = prof;
+            if (prof != PROFILE_CUSTOM) {
+                applyProfileDefaults(prof);
+            }
+        }
+
+        // Apply changes individually if profile is CUSTOM or was overridden
+        if (sysSettings.test_profile == PROFILE_CUSTOM) {
+            if (doc.containsKey("enable_dashboard")) sysSettings.enable_dashboard = doc["enable_dashboard"];
+            if (doc.containsKey("enable_teach_mode")) sysSettings.enable_teach_mode = doc["enable_teach_mode"];
+            if (doc.containsKey("enable_repeat_mode")) sysSettings.enable_repeat_mode = doc["enable_repeat_mode"];
+            if (doc.containsKey("enable_manual_control")) sysSettings.enable_manual_control = doc["enable_manual_control"];
+            if (doc.containsKey("enable_route_manager")) sysSettings.enable_route_manager = doc["enable_route_manager"];
+            if (doc.containsKey("enable_rfid_manager")) sysSettings.enable_rfid_manager_flag = doc["enable_rfid_manager"];
+            if (doc.containsKey("enable_error_log")) sysSettings.enable_error_log = doc["enable_error_log"];
+            if (doc.containsKey("enable_system_info")) sysSettings.enable_system_info = doc["enable_system_info"];
+
+            if (doc.containsKey("enable_stm32_uart")) sysSettings.enable_stm32_uart = doc["enable_stm32_uart"];
+            if (doc.containsKey("enable_websocket")) sysSettings.enable_websocket = doc["enable_websocket"];
+
+            if (doc.containsKey("enable_motor_control")) sysSettings.enable_motor_control = doc["enable_motor_control"];
+            if (doc.containsKey("enable_encoder")) sysSettings.enable_encoder = doc["enable_encoder"];
+            if (doc.containsKey("enable_mpu6050")) sysSettings.enable_mpu6050 = doc["enable_mpu6050"];
+            if (doc.containsKey("enable_pid")) sysSettings.enable_pid = doc["enable_pid"];
+
+            if (doc.containsKey("rfid_reader")) sysSettings.rfid_reader = doc["rfid_reader"];
+            if (doc.containsKey("rfid_manager_flag")) sysSettings.rfid_manager_flag = doc["rfid_manager_flag"];
+            if (doc.containsKey("rfid_checkpoints")) sysSettings.rfid_checkpoints = doc["rfid_checkpoints"];
+
+            if (doc.containsKey("tof_sensors")) sysSettings.tof_sensors = doc["tof_sensors"];
+            if (doc.containsKey("left_tof")) sysSettings.left_tof = doc["left_tof"];
+            if (doc.containsKey("centre_tof")) sysSettings.centre_tof = doc["centre_tof"];
+            if (doc.containsKey("right_tof")) sysSettings.right_tof = doc["right_tof"];
+            if (doc.containsKey("obstacle_detection")) sysSettings.obstacle_detection = doc["obstacle_detection"];
+
+            if (doc.containsKey("battery_monitoring")) sysSettings.battery_monitoring = doc["battery_monitoring"];
+            if (doc.containsKey("ina219")) sysSettings.ina219 = doc["ina219"];
+            if (doc.containsKey("voltage_monitoring")) sysSettings.voltage_monitoring = doc["voltage_monitoring"];
+            if (doc.containsKey("current_monitoring")) sysSettings.current_monitoring = doc["current_monitoring"];
+            if (doc.containsKey("power_monitoring")) sysSettings.power_monitoring = doc["power_monitoring"];
+            if (doc.containsKey("battery_percentage")) sysSettings.battery_percentage = doc["battery_percentage"];
+            if (doc.containsKey("low_battery_warning")) sysSettings.low_battery_warning = doc["low_battery_warning"];
+            if (doc.containsKey("critical_battery_warning")) sysSettings.critical_battery_warning = doc["critical_battery_warning"];
+            if (doc.containsKey("battery_fault_detection")) sysSettings.battery_fault_detection = doc["battery_fault_detection"];
+            if (doc.containsKey("charging_status")) sysSettings.charging_status = doc["charging_status"];
+        }
+
+        // Threshold values can always be set
+        if (doc.containsKey("low_voltage")) sysSettings.low_voltage = doc["low_voltage"].as<float>();
+        if (doc.containsKey("critical_voltage")) sysSettings.critical_voltage = doc["critical_voltage"].as<float>();
+        if (doc.containsKey("low_battery_pct")) sysSettings.low_battery_pct = doc["low_battery_pct"].as<int>();
+        if (doc.containsKey("critical_battery_pct")) sysSettings.critical_battery_pct = doc["critical_battery_pct"].as<int>();
+
+        if (doc.containsKey("demo_mode")) sysSettings.demo_mode = doc["demo_mode"];
+
+        if (doc.containsKey("wifi_ssid")) {
+            String ssid = doc["wifi_ssid"];
+            strncpy(sysSettings.wifi_ssid, ssid.c_str(), sizeof(sysSettings.wifi_ssid));
+        }
+        if (doc.containsKey("wifi_password")) {
+            String pass = doc["wifi_password"];
+            strncpy(sysSettings.wifi_password, pass.c_str(), sizeof(sysSettings.wifi_password));
+        }
+
+        saveSettings();
+        sendSuccessResponse(request, "Settings updated successfully");
+    });
+
+    // POST /api/errors/clear
+    server.on("/api/errors/clear", HTTP_POST, [](AsyncWebServerRequest *request) {
+        clearTodayLog();
+        sendSuccessResponse(request, "Error logs cleared");
+    });
+
+    // POST /api/serial/command
+    server.on("/api/serial/command", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, data, len);
+        if (err) {
+            sendErrorResponse(request, "Invalid JSON payload");
+            return;
+        }
+
+        String command = doc["command"] | "";
+        if (command.length() == 0) {
+            sendErrorResponse(request, "Command cannot be empty");
+            return;
+        }
+
+        handleSerialCommand(command);
+        sendSuccessResponse(request, "Command received");
+    });
+
+    // ------------------------------------------------------------------------
+    // WEB SERVER STATIC FILES FROM LittleFS
+    // ------------------------------------------------------------------------
+    server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+
+    // Init websockets
+    webSocketInit(&server);
+
+    // Launch server
+    server.begin();
+    Serial.println("Webserver: Started successfully on port 80");
+}

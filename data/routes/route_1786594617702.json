@@ -1,0 +1,45 @@
+{
+  "id": "route_1786594617702",
+  "name": "Office to Lab",
+  "start": "START",
+  "destination": "LAB",
+  "checkpoints": [
+    "START",
+    "LAB"
+  ],
+  "distance": 0.07,
+  "duration": 204,
+  "created": "2026-08-13",
+  "trajectory": [
+    {
+      "x": 0,
+      "y": 0,
+      "heading": 0,
+      "rfid": "START"
+    },
+    {
+      "x": 0.01,
+      "y": 0,
+      "heading": 0,
+      "rfid": "START"
+    },
+    {
+      "x": 0.03,
+      "y": 0,
+      "heading": 0,
+      "rfid": "START"
+    },
+    {
+      "x": 0.05,
+      "y": 0,
+      "heading": 2.3,
+      "rfid": "START"
+    },
+    {
+      "x": 0.07,
+      "y": 0,
+      "heading": 2.3,
+      "rfid": "START"
+    }
+  ]
+}

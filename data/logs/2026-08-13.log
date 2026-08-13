@@ -1,0 +1,5 @@
+09:14:22	UART	E01	Communication Timeout
+09:31:07	RFID	E03	RFID Read Failure
+10:05:41	MPU6050	E04	IMU Communication Failure
+11:22:13	ToF	E05	Sensor Timeout
+14:45:09	BATTERY	E06	Low Battery
