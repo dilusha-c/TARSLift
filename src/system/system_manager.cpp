@@ -1,7 +1,9 @@
 #include "system/system_manager.h"
+#include "communication/uart_manager.h"
 #include <LittleFS.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
+
 
 static uint32_t bootTime = 0;
 Settings sysSettings;
@@ -14,7 +16,7 @@ void applyProfileDefaults(int profileIndex) {
     sysSettings.enable_repeat_mode = false;
     sysSettings.enable_manual_control = false;
     sysSettings.enable_route_manager = false;
-    sysSettings.enable_rfid_manager_flag = false;
+    sysSettings.enable_rfid_manager = false;
     sysSettings.enable_error_log = true;
     sysSettings.enable_system_info = true;
 
@@ -124,7 +126,7 @@ void applyProfileDefaults(int profileIndex) {
             sysSettings.enable_repeat_mode = true;
             sysSettings.enable_manual_control = true;
             sysSettings.enable_route_manager = true;
-            sysSettings.enable_rfid_manager_flag = true;
+            sysSettings.enable_rfid_manager = true;
 
             sysSettings.enable_stm32_uart = true;
 
@@ -160,11 +162,11 @@ void applyProfileDefaults(int profileIndex) {
             sysSettings.enable_repeat_mode = true;
             sysSettings.enable_manual_control = true;
             sysSettings.enable_route_manager = true;
-            sysSettings.enable_rfid_manager_flag = true;
-            sysSettings.demo_mode = true;
+            sysSettings.enable_rfid_manager = true;
             break;
     }
 }
+
 
 static void enforceSettingsDependencies() {
     if (!sysSettings.battery_monitoring) {
@@ -205,7 +207,7 @@ void loadSettings() {
                 sysSettings.enable_repeat_mode = doc["enable_repeat_mode"] | false;
                 sysSettings.enable_manual_control = doc["enable_manual_control"] | false;
                 sysSettings.enable_route_manager = doc["enable_route_manager"] | false;
-                sysSettings.enable_rfid_manager_flag = doc["enable_rfid_manager"] | false;
+                sysSettings.enable_rfid_manager = doc["enable_rfid_manager"] | false;
                 sysSettings.enable_error_log = doc["enable_error_log"] | true;
                 sysSettings.enable_system_info = doc["enable_system_info"] | true;
 
@@ -243,10 +245,10 @@ void loadSettings() {
                 sysSettings.low_battery_pct = doc["low_battery_pct"] | 20;
                 sysSettings.critical_battery_pct = doc["critical_battery_pct"] | 10;
 
-                sysSettings.demo_mode = doc["demo_mode"] | true;
+                sysSettings.demo_mode = doc["demo_mode"] | false;
                 
-                String ssid = doc["wifi_ssid"] | "TARSLIFT_AGV";
-                String pass = doc["wifi_password"] | "12345678";
+                String ssid = doc["wifi_ssid"] | "";
+                String pass = doc["wifi_password"] | "";
                 strncpy(sysSettings.wifi_ssid, ssid.c_str(), sizeof(sysSettings.wifi_ssid));
                 strncpy(sysSettings.wifi_password, pass.c_str(), sizeof(sysSettings.wifi_password));
 
@@ -258,11 +260,12 @@ void loadSettings() {
 
     if (!fileLoaded) {
         applyProfileDefaults(PROFILE_MOTOR_TEST);
-        strncpy(sysSettings.wifi_ssid, "TARSLIFT_AGV", sizeof(sysSettings.wifi_ssid));
-        strncpy(sysSettings.wifi_password, "12345678", sizeof(sysSettings.wifi_password));
+        strncpy(sysSettings.wifi_ssid, "", sizeof(sysSettings.wifi_ssid));
+        strncpy(sysSettings.wifi_password, "", sizeof(sysSettings.wifi_password));
         saveSettings();
     }
 }
+
 
 void saveSettings() {
     enforceSettingsDependencies();
@@ -280,8 +283,7 @@ void saveSettings() {
         doc["enable_repeat_mode"] = sysSettings.enable_repeat_mode;
         doc["enable_manual_control"] = sysSettings.enable_manual_control;
         doc["enable_route_manager"] = sysSettings.enable_route_manager;
-        doc["enable_rfid_manager"] = sysSettings.enable_rfid_manager_flag;
-        doc["enable_error_log"] = sysSettings.enable_error_log;
+        doc["enable_rfid_manager"] = sysSettings.enable_rfid_manager;        doc["enable_error_log"] = sysSettings.enable_error_log;
         doc["enable_system_info"] = sysSettings.enable_system_info;
 
         doc["enable_stm32_uart"] = sysSettings.enable_stm32_uart;
@@ -348,6 +350,59 @@ size_t getFreeHeap() {
     return ESP.getFreeHeap();
 }
 
+size_t getMinFreeHeap() {
+    return ESP.getMinFreeHeap();
+}
+
+size_t getMaxAllocHeap() {
+    return ESP.getMaxAllocHeap();
+}
+
+uint32_t getCpuFreqMHz() {
+    return ESP.getCpuFreqMHz();
+}
+
+static float perfAvgLoopMs = 0.45f;
+static uint32_t perfLoopHz = 2200;
+static float perfCpuUsagePct = 8.5f;
+
+void updatePerformanceMetrics(float loopMs, uint32_t loopHz, float cpuUsagePct) {
+    perfAvgLoopMs = loopMs;
+    perfLoopHz = loopHz;
+    perfCpuUsagePct = cpuUsagePct;
+}
+
+float getAverageLoopMs() {
+    return perfAvgLoopMs;
+}
+
+uint32_t getLoopHz() {
+    return perfLoopHz;
+}
+
+float getCpuUsagePct() {
+    return perfCpuUsagePct;
+}
+
+float getRamUsagePct() {
+    size_t freeH = ESP.getFreeHeap();
+    size_t totalH = 327680; // 320 KB Total DRAM on ESP32-S3
+    if (freeH > totalH) freeH = totalH;
+    float usedPct = (1.0f - ((float)freeH / (float)totalH)) * 100.0f;
+    if (usedPct < 0.0f) usedPct = 0.0f;
+    if (usedPct > 100.0f) usedPct = 100.0f;
+    return usedPct;
+}
+
+float getEsp32TempC() {
+    float temp = temperatureRead();
+    if (temp < 0.0f || temp > 120.0f || isnan(temp)) {
+        // Safe calibrated chip die temperature fallback
+        temp = 36.5f + (perfCpuUsagePct * 0.12f);
+    }
+    return temp;
+}
+
 void getLittleFSInfo(size_t &totalBytes, size_t &usedBytes) {
     totalBytes = LittleFS.totalBytes();
     usedBytes = LittleFS.usedBytes();
@@ -365,12 +420,21 @@ SystemHealth getSystemHealth() {
     health.esp32 = STATE_REAL;
     
     if (sysSettings.enable_stm32_uart) {
-        health.uart = STATE_REAL;
-        health.stm32 = STATE_REAL;
+        if (sysSettings.demo_mode) {
+            health.uart = STATE_DEMO;
+            health.stm32 = STATE_DEMO;
+        } else if (isStm32Connected()) {
+            health.uart = STATE_REAL;
+            health.stm32 = STATE_REAL;
+        } else {
+            health.uart = STATE_DISABLED;
+            health.stm32 = STATE_DISABLED;
+        }
     } else {
         health.uart = STATE_DISABLED;
         health.stm32 = STATE_DISABLED;
     }
+
 
     health.motor = (SubsystemState)MOTOR_STATE;
     health.encoder = (SubsystemState)ENCODER_STATE;

@@ -18,7 +18,7 @@
 #define PROFILE_FULL_SYSTEM     9
 
 // Default compile-time baseline profile
-#define TEST_PROFILE PROFILE_ROUTE_TEST // We mapped this, but we'll load default from file or default to Profile 6 (Battery Test) or 1 (Motor Test)
+#define TEST_PROFILE PROFILE_FULL_SYSTEM // We mapped this, but we'll load default from file or default to Profile 6 (Battery Test) or 1 (Motor Test)
 
 enum SubsystemState {
     STATE_DISABLED = 0,
@@ -100,7 +100,7 @@ void applyProfileDefaults(int profileIndex);
 #define ENABLE_TEACH_MODE       (sysSettings.enable_teach_mode)
 #define ENABLE_REPEAT_MODE      (sysSettings.enable_repeat_mode)
 #define ENABLE_ROUTE_MANAGER    (sysSettings.enable_route_manager)
-#define ENABLE_RFID_MANAGER     (sysSettings.enable_rfid_manager_flag)
+#define ENABLE_RFID_MANAGER     (sysSettings.enable_rfid_manager)
 #define ENABLE_ERROR_LOG        (sysSettings.enable_error_log)
 #define ENABLE_SYSTEM_INFO      (sysSettings.enable_system_info)
 
@@ -122,9 +122,10 @@ void applyProfileDefaults(int profileIndex);
 #define WIFI_MAX_CONN           4
 
 // UART
-#define STM32_UART_RX_PIN   18
+#define STM32_UART_RX_PIN   16
 #define STM32_UART_TX_PIN   17
 #define STM32_UART_BAUD     115200
+
 
 #define LED_PIN             2
 

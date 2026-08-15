@@ -26,6 +26,11 @@ void demoManagerUpdate();
 // Telemetry output
 TelemetryData getTelemetry();
 
+// Real-time Telemetry updates from STM32 UART packets
+void updateTelemetryOdometry(float distanceMeters, float yawDeg);
+void updateTelemetryHeading(float yawDeg);
+void updateTelemetryMotors(int16_t leftRpm, int16_t rightRpm);
+
 // Input from client manual control
 void handleDemoManualMove(const String &direction, int speedPct);
 void handleDemoManualStop();

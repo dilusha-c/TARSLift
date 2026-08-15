@@ -9,44 +9,55 @@ static SystemError currentActiveError = {"", "", "", "", false};
 static String todayDate = "2026-08-13"; // Default date, can be updated via NTP or manually
 
 void errorLoggerInit() {
-    #if ENABLE_ERROR_LOG
-    if (!LittleFS.exists("/logs")) {
-        LittleFS.mkdir("/logs");
+    if (ENABLE_ERROR_LOG) {
+        if (!LittleFS.exists("/logs")) {
+            LittleFS.mkdir("/logs");
+        }
     }
-    #endif
 }
 
+static unsigned long lastLogTimestamp = 0;
+static String lastLogCode = "";
+
 void logError(const String &source, const String &code, const String &description) {
-    #if ENABLE_ERROR_LOG
-    String logPath = getTodayLogPath();
-    File logFile = LittleFS.open(logPath, FILE_APPEND);
-    if (!logFile) {
-        Serial.println("ErrorLogger: Failed to open log file for appending!");
-        return;
+    if (ENABLE_ERROR_LOG) {
+        // Prevent duplicate SPI flash write wear if same error repeats continuously
+        unsigned long now = millis();
+        if (code == lastLogCode && (now - lastLogTimestamp < 2000)) {
+            return;
+        }
+        lastLogCode = code;
+        lastLogTimestamp = now;
+
+        String logPath = getTodayLogPath();
+        File logFile = LittleFS.open(logPath, FILE_APPEND);
+        if (!logFile) {
+            Serial.println("ErrorLogger: Failed to open log file for appending!");
+            return;
+        }
+
+        // Format: HH:MM:SS\tSOURCE\tCODE\tDESCRIPTION
+        // We simulate a simple time index if NTP is not set
+        unsigned long secs = millis() / 1000;
+        char timeStr[9];
+        snprintf(timeStr, sizeof(timeStr), "%02lu:%02lu:%02lu", (secs / 3600) % 24, (secs / 60) % 60, secs % 60);
+
+        logFile.printf("%s\t%s\t%s\t%s\n", timeStr, source.c_str(), code.c_str(), description.c_str());
+        logFile.close();
+
+        // Update active error
+        setCurrentError(source, code, description);
     }
-
-    // Format: HH:MM:SS\tSOURCE\tCODE\tDESCRIPTION
-    // We simulate a simple time index if NTP is not set
-    unsigned long secs = millis() / 1000;
-    char timeStr[9];
-    snprintf(timeStr, sizeof(timeStr), "%02lu:%02lu:%02lu", (secs / 3600) % 24, (secs / 60) % 60, secs % 60);
-
-    logFile.printf("%s\t%s\t%s\t%s\n", timeStr, source.c_str(), code.c_str(), description.c_str());
-    logFile.close();
-
-    // Update active error
-    setCurrentError(source, code, description);
-    #endif
 }
 
 void clearTodayLog() {
-    #if ENABLE_ERROR_LOG
-    String logPath = getTodayLogPath();
-    if (LittleFS.exists(logPath)) {
-        LittleFS.remove(logPath);
+    if (ENABLE_ERROR_LOG) {
+        String logPath = getTodayLogPath();
+        if (LittleFS.exists(logPath)) {
+            LittleFS.remove(logPath);
+        }
+        clearCurrentError();
     }
-    clearCurrentError();
-    #endif
 }
 
 String getTodayLogPath() {
@@ -54,20 +65,20 @@ String getTodayLogPath() {
 }
 
 String readLogFile(const String &path) {
-    #if ENABLE_ERROR_LOG
-    if (!LittleFS.exists(path)) {
+    if (ENABLE_ERROR_LOG) {
+        if (!LittleFS.exists(path)) {
+            return "";
+        }
+        File logFile = LittleFS.open(path, FILE_READ);
+        if (!logFile) {
+            return "";
+        }
+        String content = logFile.readString();
+        logFile.close();
+        return content;
+    } else {
         return "";
     }
-    File logFile = LittleFS.open(path, FILE_READ);
-    if (!logFile) {
-        return "";
-    }
-    String content = logFile.readString();
-    logFile.close();
-    return content;
-    #else
-    return "";
-    #endif
 }
 
 JsonDocument getErrorStatistics() {
@@ -75,7 +86,7 @@ JsonDocument getErrorStatistics() {
     JsonObject stats = doc.to<JsonObject>();
     stats["total"] = 0;
     
-    JsonObject categories = stats.createNestedObject("categories");
+    JsonObject categories = stats["categories"].to<JsonObject>();
     categories["UART"] = 0;
     categories["RFID"] = 0;
     categories["MPU6050"] = 0;
@@ -85,32 +96,32 @@ JsonDocument getErrorStatistics() {
     categories["Battery"] = 0;
     categories["System"] = 0;
 
-    #if ENABLE_ERROR_LOG
-    String logPath = getTodayLogPath();
-    if (LittleFS.exists(logPath)) {
-        File logFile = LittleFS.open(logPath, FILE_READ);
-        if (logFile) {
-            int count = 0;
-            while (logFile.available()) {
-                String line = logFile.readStringUntil('\n');
-                if (line.length() == 0) continue;
-                count++;
-                
-                // Classify category by matching strings in line
-                if (line.indexOf("UART") >= 0) categories["UART"] = categories["UART"].as<int>() + 1;
-                else if (line.indexOf("RFID") >= 0) categories["RFID"] = categories["RFID"].as<int>() + 1;
-                else if (line.indexOf("MPU6050") >= 0) categories["MPU6050"] = categories["MPU6050"].as<int>() + 1;
-                else if (line.indexOf("ToF") >= 0) categories["ToF"] = categories["ToF"].as<int>() + 1;
-                else if (line.indexOf("Encoder") >= 0) categories["Encoder"] = categories["Encoder"].as<int>() + 1;
-                else if (line.indexOf("Motor") >= 0) categories["Motor"] = categories["Motor"].as<int>() + 1;
-                else if (line.indexOf("Battery") >= 0) categories["Battery"] = categories["Battery"].as<int>() + 1;
-                else categories["System"] = categories["System"].as<int>() + 1;
+    if (ENABLE_ERROR_LOG) {
+        String logPath = getTodayLogPath();
+        if (LittleFS.exists(logPath)) {
+            File logFile = LittleFS.open(logPath, FILE_READ);
+            if (logFile) {
+                int count = 0;
+                while (logFile.available()) {
+                    String line = logFile.readStringUntil('\n');
+                    if (line.length() == 0) continue;
+                    count++;
+                    
+                    // Classify category by matching strings in line
+                    if (line.indexOf("UART") >= 0) categories["UART"] = categories["UART"].as<int>() + 1;
+                    else if (line.indexOf("RFID") >= 0) categories["RFID"] = categories["RFID"].as<int>() + 1;
+                    else if (line.indexOf("MPU6050") >= 0) categories["MPU6050"] = categories["MPU6050"].as<int>() + 1;
+                    else if (line.indexOf("ToF") >= 0) categories["ToF"] = categories["ToF"].as<int>() + 1;
+                    else if (line.indexOf("Encoder") >= 0) categories["Encoder"] = categories["Encoder"].as<int>() + 1;
+                    else if (line.indexOf("Motor") >= 0) categories["Motor"] = categories["Motor"].as<int>() + 1;
+                    else if (line.indexOf("Battery") >= 0) categories["Battery"] = categories["Battery"].as<int>() + 1;
+                    else categories["System"] = categories["System"].as<int>() + 1;
+                }
+                stats["total"] = count;
+                logFile.close();
             }
-            stats["total"] = count;
-            logFile.close();
         }
     }
-    #endif
 
     return doc;
 }

@@ -269,7 +269,6 @@ let repeatRoute = null;
 let repeatCheckpoints = [];
 let repeatProgressTimer = null;
 
-
 // RFID scanning trigger
 let isRfidScanning = false;
 let rfidScanTimer = null;
@@ -302,8 +301,8 @@ setInterval(() => {
 
     // Sync health stats with settings
     agvState.health.esp32 = 2; // REAL
-    agvState.health.uart = settingsState.enable_stm32_uart ? 2 : 0;
-    agvState.health.stm32 = settingsState.enable_stm32_uart ? 2 : 0;
+    agvState.health.uart = settingsState.enable_stm32_uart ? (settingsState.demo_mode ? 1 : 0) : 0;
+    agvState.health.stm32 = settingsState.enable_stm32_uart ? (settingsState.demo_mode ? 1 : 0) : 0;
     agvState.health.motor = settingsState.enable_motor_control ? (settingsState.demo_mode ? 1 : 2) : 0;
     agvState.health.encoder = settingsState.enable_encoder ? (settingsState.demo_mode ? 1 : 2) : 0;
     agvState.health.mpu6050 = settingsState.enable_mpu6050 ? (settingsState.demo_mode ? 1 : 2) : 0;
@@ -333,13 +332,8 @@ setInterval(() => {
     }
 
     // Handle teach mode driving
-    if ((agvState.mode === "TEACH" && agvState.state === "RECORDING") || (agvState.mode === "IDLE" && manualDirection !== "STOP")) {
+    if (agvState.mode === "TEACH" && agvState.state === "RECORDING") {
         const speedVal = (manualSpeedPercent / 100.0) * 0.5; // Max 0.5 m/s
-
-        // When driving in IDLE mode, set mode to MANUAL for dashboard feedback
-        if (agvState.mode === "IDLE" && manualDirection !== "STOP") {
-            agvState.state = "MANUAL_DRIVE";
-        }
 
         if (manualDirection === "FORWARD") {
             agvState.speed = speedVal;
@@ -352,15 +346,15 @@ setInterval(() => {
             const dy = agvState.speed * Math.sin(rad) * dt;
             agvState.x += dx;
             agvState.y += dy;
-            if (agvState.mode === "TEACH") {
-                teachDistance += Math.sqrt(dx * dx + dy * dy);
-                teachPoints.push({
-                    x: Math.round(agvState.x * 100) / 100,
-                    y: Math.round(agvState.y * 100) / 100,
-                    heading: Math.round(agvState.heading * 10) / 10,
-                    rfid: agvState.rfid
-                });
-            }
+            teachDistance += Math.sqrt(dx * dx + dy * dy);
+
+            // Record trajectory point
+            teachPoints.push({
+                x: Math.round(agvState.x * 100) / 100,
+                y: Math.round(agvState.y * 100) / 100,
+                heading: Math.round(agvState.heading * 10) / 10,
+                rfid: agvState.rfid
+            });
         } 
         else if (manualDirection === "REVERSE") {
             agvState.speed = -speedVal;
@@ -373,15 +367,14 @@ setInterval(() => {
             const dy = agvState.speed * Math.sin(rad) * dt;
             agvState.x += dx;
             agvState.y += dy;
-            if (agvState.mode === "TEACH") {
-                teachDistance += Math.sqrt(dx * dx + dy * dy);
-                teachPoints.push({
-                    x: Math.round(agvState.x * 100) / 100,
-                    y: Math.round(agvState.y * 100) / 100,
-                    heading: Math.round(agvState.heading * 10) / 10,
-                    rfid: agvState.rfid
-                });
-            }
+            teachDistance += Math.sqrt(dx * dx + dy * dy);
+
+            teachPoints.push({
+                x: Math.round(agvState.x * 100) / 100,
+                y: Math.round(agvState.y * 100) / 100,
+                heading: Math.round(agvState.heading * 10) / 10,
+                rfid: agvState.rfid
+            });
         } 
         else if (manualDirection === "LEFT") {
             agvState.speed = 0;
@@ -402,9 +395,6 @@ setInterval(() => {
             agvState.motor.left_rpm = 0;
             agvState.motor.right_rpm = 0;
             agvState.motor.target_rpm = 0;
-            if (agvState.mode === "IDLE") {
-                agvState.state = "STOPPED";
-            }
         }
     }
 
@@ -882,6 +872,66 @@ const server = http.createServer((req, res) => {
                 res.end(JSON.stringify({ status: "success", message: "Command received" }));
                 return;
             }
+
+            // POST /api/system/wipe
+            if (pathname === '/api/system/wipe') {
+                const pw = json.password;
+                if (pw !== "1234") {
+                    res.writeHead(401, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ status: "error", message: "Unauthorized: Invalid password" }));
+                    return;
+                }
+
+                // Simulate reset
+                mockSerialLogs = ["[00:00:00] TARSLIFT AGV - ESP32-S3 High-Level Controller", "[00:00:01] System flash memory erased. Settings reset to defaults."];
+                
+                settingsState = {
+                    test_profile: 1,
+                    enable_dashboard: true,
+                    enable_teach_mode: true,
+                    enable_repeat_mode: false,
+                    enable_manual_control: true,
+                    enable_route_manager: false,
+                    enable_rfid_manager: false,
+                    enable_error_log: true,
+                    enable_system_info: true,
+                    enable_stm32_uart: true,
+                    enable_websocket: true,
+                    enable_motor_control: true,
+                    enable_encoder: false,
+                    enable_mpu6050: false,
+                    enable_pid: false,
+                    rfid_reader: false,
+                    rfid_manager_flag: false,
+                    rfid_checkpoints: false,
+                    tof_sensors: false,
+                    left_tof: false,
+                    centre_tof: false,
+                    right_tof: false,
+                    obstacle_detection: false,
+                    battery_monitoring: false,
+                    ina219: false,
+                    voltage_monitoring: false,
+                    current_monitoring: false,
+                    power_monitoring: false,
+                    battery_percentage: false,
+                    low_battery_warning: false,
+                    critical_battery_warning: false,
+                    battery_fault_detection: false,
+                    charging_status: false,
+                    low_voltage: 10.8,
+                    critical_voltage: 10.2,
+                    low_battery_pct: 20,
+                    critical_battery_pct: 10,
+                    demo_mode: false,
+                    wifi_ssid: "TARSLIFT_AGV",
+                    wifi_password: "12345678"
+                };
+
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: "success", message: "Wiped successfully" }));
+                return;
+            }
         });
         return;
     }
@@ -992,4 +1042,3 @@ server.listen(PORT, () => {
     console.log(`  WebSocket URL: ws://localhost:${PORT}/ws`);
     console.log(`================================================================`);
 });
-

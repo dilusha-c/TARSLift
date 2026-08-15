@@ -8,6 +8,7 @@ The ESP32 communicates with a STM32F103C8T6 co-processor via UART to handle real
 
 ## Workspace Structure
 
+The project has been refactored into the following clean layout:
 ```text
 TARSLIFT_AGV/
 ├── platformio.ini              # PlatformIO project configuration
@@ -15,56 +16,87 @@ TARSLIFT_AGV/
 ├── src/                        # ESP32-S3 Arduino C++ source code
 │   ├── main.cpp                # Core boot setup and main loop
 │   ├── config.h                # System Profiles, states, pin mapping
-│   ├── system_manager.h/.cpp   # Memory, Uptime and Hardware diagnostics
-│   ├── demo_manager.h/.cpp     # Mock telemetry simulator
-│   ├── error_logger.h/.cpp     # Daily logs filesystem controller
-│   ├── rfid_manager.h/.cpp     # Mappings RFID database
-│   ├── route_manager.h/.cpp    # State-machine for Teach-and-Repeat
-│   ├── uart_manager.h/.cpp     # STM32 UART (Intentionally empty stubs)
-│   ├── web_server.h/.cpp       # Static server and REST API routers
-│   └── websocket.h/.cpp        # Telemetry broadcaster
+│   ├── config/                 # Header configs (test_profiles.h, feature_flags.h)
+│   ├── web/                    # HTTP & WebSockets (web_server, websocket)
+│   ├── mission/                # Mission state managers
+│   ├── routes/                 # Trajectory Route Manager
+│   ├── rfid/                   # RFID readers
+│   ├── battery/                # Battery monitor
+│   ├── errors/                 # Error Logger
+│   ├── system/                 # Diagnostics and system info managers
+│   ├── demo/                   # Telemetry simulator
+│   ├── communication/          # UART bus link (stm32_uart.h, stm32_uart.cpp)
+│   └── hardware/               # Peripheral drivers (motor, encoder, mpu6050, tof)
 └── data/                       # LittleFS partition web files
     ├── index.html              # Dashboard interface (Dark Industrial)
     ├── style.css               # Styling definitions (pure vanilla CSS)
     ├── app.js                  # Telemetry parsing & driving controllers
+    ├── pages/                  # Static panel section stubs
+    ├── js/                     # Component script stubs
+    ├── css/                    # Component stylesheet stubs
     ├── rfid/
     │   └── tags.json           # Registered tags database
     ├── routes/
     │   └── route_001.json      # Sample saved route trajectory
-    └── logs/
-        └── 2026-08-13.log      # Example daily log file
+    └── config/
+        └── settings.json       # Serialized system configuration file
 ```
 
 ---
 
 ## 1. System Testing Profiles (`src/config.h`)
 
-Open `src/config.h` and change `#define TEST_PROFILE` to the desired setting:
+Open `src/config.h` or navigate to the Settings page. There are 10 predefined configurations (0-9):
 
-* **Profile 1: `ROUTE_TEST` (Default)**
-  * **Demo Mode**: ON
-  * **Hardware Modules**: Disabled (ESP32-S3 and WebSocket Active)
-  * **Purpose**: Test route creation, manual keyboard teleoperation driving, Repeat Mission player, and RFID manager registration entirely in simulation without physical sensors.
-* **Profile 2: `MOTOR_TEST`**
-  * **Demo Mode**: OFF
-  * **Hardware Modules**: Motor & Encoders Enabled (via STM32 co-processor UART)
-  * **Purpose**: Test real-time motor commands and encoder feedbacks.
-* **Profile 3: `SENSOR_TEST`**
-  * **Demo Mode**: OFF
-  * **Hardware Modules**: MPU6050, RFID, ToF, and Battery Enabled.
+* **Profile 0: `CUSTOM`**
+  * **Description**: Allows you to check/uncheck individual subsystems, features, and logs directly in the Settings.
+* **Profile 1: `MOTOR_TEST` (Default)**
+  * **Description**: Enables DC Motors and Manual driving controls.
+* **Profile 2: `ENCODER_TEST`**
+  * **Description**: Encoders and Motors enabled. Used for telemetry calibration.
+* **Profile 3: `MPU6050_TEST`**
+  * **Description**: MPU6050 enabled for IMU drift calibration.
 * **Profile 4: `RFID_TEST`**
-  * **Demo Mode**: OFF
-  * **Hardware Modules**: RFID Scanner & RFID Manager Enabled.
-* **Profile 5: `FULL_SYSTEM`**
-  * **Demo Mode**: OFF
-  * **Hardware Modules**: All enabled. Final AGV deployment.
+  * **Description**: RFID reader and Tag database manager active.
+* **Profile 5: `TOF_TEST`**
+  * **Description**: Time-of-Flight sensors and Obstacle avoidance active.
+* **Profile 6: `BATTERY_TEST`**
+  * **Description**: INA219 current/voltage diagnostics active.
+* **Profile 7: `TEACH_TEST`**
+  * **Description**: Manual controls, encoders, MPU, and RFID enabled to teach routes.
+* **Profile 8: `REPEAT_TEST`**
+  * **Description**: Enables repeat mission playback, sensors, motors, and batteries.
+* **Profile 9: `FULL_SYSTEM`**
+  * **Description**: All hardware drivers, communication ports, and safety logs enabled. Final deploy profile.
 
 ---
 
-## 2. Compilation and Uploading
+## 2. Settings Tabbed Panel Navigation
+
+The Settings page is organized into three distinct sub-tabs:
+1. **Profiles & Flags**: Select testing profiles, or check/uncheck modular features and motion/sensor options under CUSTOM profile.
+2. **Battery Settings**: Configure INA219 logging switches and input warning thresholds (Low Voltage, Critical Voltage, Battery %).
+3. **System & Access Point**: Modify WiFi SSID/Password, toggle simulation mode (`DEMO_MODE`), reset to profile defaults, or perform a system wipe.
+
+---
+
+## 3. Administrative System Wipe (Password: `1234`)
+
+To wipe all data from the AGV flash memory and restart the system:
+1. Go to the **Settings** (⚙) page ➔ **System & Access Point** tab.
+2. Click the **🔴 WIPE ALL SYSTEM DATA** button.
+3. When prompted, type the administrative password:
+   ```text
+   1234
+   ```
+4. Clicking OK erases all saved routes (`/routes/`), logs (`/logs/`), RFID tag databases (`/rfid/tags.json`), and custom system configurations, then programmatically reboots the ESP32-S3.
+
+---
+
+## 4. Compilation and Uploading
 
 ### Compiling and Uploading Firmware
-Open the workspace directory in PlatformIO (VS Code) or configure the Arduino IDE (selecting the "ESP32S3 Dev Module" board):
+Open the workspace directory in PlatformIO (VS Code):
 1. Compile the firmware.
 2. Upload the compiled binary to the ESP32-S3 board.
 
@@ -72,17 +104,3 @@ Open the workspace directory in PlatformIO (VS Code) or configure the Arduino ID
 The web assets located in the `data/` folder must be uploaded to the ESP32-S3 flash partition using the LittleFS filesystem:
 1. Run the **Build Filesystem Image** command in PlatformIO.
 2. Run the **Upload Filesystem Image** command to write the web dashboard files.
-
----
-
-## 3. How to Connect and Open Dashboard
-
-1. Once powered, the ESP32-S3 creates a Wi-Fi Access Point:
-   * **SSID**: `TARSLIFT_AGV`
-   * **Password**: `12345678`
-2. Connect your PC, phone, or tablet to the `TARSLIFT_AGV` Wi-Fi network.
-3. Open a browser and navigate to:
-   ```text
-   http://192.168.4.1
-   ```
-4. The dashboard will load directly from the ESP32-S3 and start displaying real-time telemetry updates.

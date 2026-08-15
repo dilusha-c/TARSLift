@@ -6,7 +6,6 @@
 #include "routes/route_manager.h"
 #include "errors/error_logger.h"
 
-#if ENABLE_WEBSOCKET
 static AsyncWebSocket ws("/ws");
 
 static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
@@ -20,18 +19,17 @@ static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsE
         // Handle incoming WebSocket messages if any
     }
 }
-#endif
 
 void webSocketInit(AsyncWebServer *server) {
-    #if ENABLE_WEBSOCKET
-    ws.onEvent(onWsEvent);
-    server->addHandler(&ws);
-    Serial.println("WebSocket: Registered /ws handler");
-    #endif
+    if (ENABLE_WEBSOCKET) {
+        ws.onEvent(onWsEvent);
+        server->addHandler(&ws);
+        Serial.println("WebSocket: Registered /ws handler");
+    }
 }
 
 void broadcastTelemetry() {
-    #if ENABLE_WEBSOCKET
+    if (!ENABLE_WEBSOCKET) return;
     if (ws.count() == 0) return; // No clients connected
 
     JsonDocument doc;
@@ -91,20 +89,20 @@ void broadcastTelemetry() {
     }
 
     // ToF Sensors
-    JsonObject tof = doc.createNestedObject("tof");
+    JsonObject tof = doc["tof"].to<JsonObject>();
     tof["left"] = tele.tof_left;
     tof["centre"] = tele.tof_centre;
     tof["right"] = tele.tof_right;
 
     // Motor Speeds
-    JsonObject motor = doc.createNestedObject("motor");
+    JsonObject motor = doc["motor"].to<JsonObject>();
     motor["left_rpm"] = tele.left_rpm;
     motor["right_rpm"] = tele.right_rpm;
     motor["target_rpm"] = tele.target_rpm;
 
     // System Health & Diagnostics
     SystemHealth health = getSystemHealth();
-    JsonObject healthObj = doc.createNestedObject("health");
+    JsonObject healthObj = doc["health"].to<JsonObject>();
     healthObj["esp32"] = (int)health.esp32;
     healthObj["stm32"] = (int)health.stm32;
     healthObj["motor"] = (int)health.motor;
@@ -120,10 +118,26 @@ void broadcastTelemetry() {
     doc["heap"] = getFreeHeap();
     doc["rssi"] = getWifiRSSI();
 
+    // Dual IP Reporting
+    doc["ap_ip"] = WiFi.softAPIP().toString();
+    doc["sta_ip"] = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "Disconnected";
+    doc["sta_connected"] = (WiFi.status() == WL_CONNECTED);
+    doc["sta_ssid"] = sysSettings.wifi_ssid;
+
     size_t fsTotal = 0, fsUsed = 0;
     getLittleFSInfo(fsTotal, fsUsed);
     doc["fs_total"] = fsTotal;
     doc["fs_used"] = fsUsed;
+
+    // ESP32-S3 Hardware Performance Profiler Metrics
+    doc["cpu_mhz"] = getCpuFreqMHz();
+    doc["min_heap"] = getMinFreeHeap();
+    doc["max_alloc"] = getMaxAllocHeap();
+    doc["loop_ms"] = getAverageLoopMs();
+    doc["loop_hz"] = getLoopHz();
+    doc["cpu_usage"] = getCpuUsagePct();
+    doc["ram_usage"] = getRamUsagePct();
+    doc["esp_temp"] = getEsp32TempC();
 
     // Active Route Information
     doc["active_route"] = getActiveRouteName();
@@ -133,7 +147,7 @@ void broadcastTelemetry() {
 
     // Current Active Error
     SystemError err = getCurrentError();
-    JsonObject errObj = doc.createNestedObject("active_error");
+    JsonObject errObj = doc["active_error"].to<JsonObject>();
     errObj["active"] = err.active;
     if (err.active) {
         errObj["timestamp"] = err.timestamp;
@@ -142,20 +156,26 @@ void broadcastTelemetry() {
         errObj["description"] = err.description;
     }
 
-    // Live Web Serial Console log buffer
-    doc["serial_logs"] = getWebSerialLogs();
+    // Live Web Serial Console log buffer (limit to latest 12 entries in telemetry stream to save bandwidth)
+    JsonDocument logsDoc = getWebSerialLogs();
+    JsonArray logsArr = logsDoc.as<JsonArray>();
+    JsonArray targetArr = doc["serial_logs"].to<JsonArray>();
+    size_t totalLogs = logsArr.size();
+    size_t startIdx = (totalLogs > 12) ? (totalLogs - 12) : 0;
+    for (size_t i = startIdx; i < totalLogs; i++) {
+        targetArr.add(logsArr[i]);
+    }
 
     // Serialize and broadcast
     String buffer;
+    buffer.reserve(1024);
     serializeJson(doc, buffer);
     ws.textAll(buffer);
-    #endif
 }
 
 bool isWebSocketClientConnected() {
-    #if ENABLE_WEBSOCKET
-    return ws.count() > 0;
-    #else
+    if (ENABLE_WEBSOCKET) {
+        return ws.count() > 0;
+    }
     return false;
-    #endif
 }

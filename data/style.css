@@ -1133,3 +1133,428 @@ button, input, select, textarea {
     }
 }
 
+/* Settings Sub-Tabs Styling */
+.settings-tabs {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 24px;
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 8px;
+}
+
+.settings-tab-btn {
+    background: none;
+    border: none;
+    padding: 10px 20px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+    border-radius: 4px;
+    transition: all var(--transition-speed) ease;
+}
+
+.settings-tab-btn:hover {
+    color: var(--text-main);
+    background-color: var(--bg-input);
+}
+
+.settings-tab-btn.active {
+    color: var(--color-blue);
+    background-color: rgba(59, 130, 246, 0.1);
+}
+
+/* Tab Panels */
+.settings-panel {
+    display: none;
+    animation: settings-fade-in 0.25s ease-in-out forwards;
+}
+
+.settings-panel.active {
+    display: block;
+}
+
+@keyframes settings-fade-in {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================================
+   2D INTERACTIVE MAP CARD & CANVAS STYLES
+   ============================================================================ */
+.map-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.map-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.map-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+.map-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--color-blue);
+    flex-shrink: 0;
+}
+
+.map-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+}
+
+.map-top-bar {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 10;
+    pointer-events: none;
+}
+
+.coord-badge {
+    background: rgba(9, 13, 22, 0.85);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    color: var(--color-blue);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 20px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    pointer-events: auto;
+    display: inline-block;
+}
+
+.map-btn {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.map-btn:hover {
+    background: var(--color-blue);
+    color: #fff;
+    border-color: var(--color-blue);
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+}
+
+.map-btn.danger:hover {
+    background: var(--color-red);
+    color: #fff;
+    border-color: var(--color-red);
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+}
+
+.map-canvas-wrapper {
+    position: relative;
+    width: 100%;
+    height: 420px;
+    background: #090d16;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    touch-action: none;
+    box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.8);
+}
+
+.map-canvas-wrapper canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* ============================================================================
+   360° TOUCH JOYSTICK WIDGET STYLES
+   ============================================================================ */
+.manual-drive-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.control-mode-toggle {
+    display: flex;
+    background: var(--bg-dark);
+    padding: 3px;
+    border-radius: 20px;
+    border: 1px solid var(--border-color);
+}
+
+.toggle-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 5px 12px;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.toggle-btn.active {
+    background: var(--color-blue);
+    color: #fff;
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+}
+
+.joystick-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 16px 0;
+    user-select: none;
+    -webkit-user-select: none;
+    width: 100%;
+}
+
+.dual-joysticks-container {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    width: 100%;
+    gap: 16px;
+}
+
+.joystick-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.stick-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.joystick-base {
+    position: relative;
+    width: 130px;
+    height: 130px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(15, 23, 42, 0.9) 0%, rgba(9, 13, 22, 0.95) 100%);
+    border: 2px solid rgba(59, 130, 246, 0.4);
+    box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8), 0 0 15px rgba(59, 130, 246, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: none;
+    cursor: grab;
+}
+
+.joystick-base.active {
+    border-color: var(--color-yellow);
+    box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8), 0 0 20px rgba(234, 179, 8, 0.3);
+    cursor: grabbing;
+}
+
+.joystick-axis-y {
+    position: absolute;
+    width: 2px;
+    height: 70%;
+    background: rgba(59, 130, 246, 0.3);
+    pointer-events: none;
+}
+
+.joystick-axis-x {
+    position: absolute;
+    height: 2px;
+    width: 70%;
+    background: rgba(59, 130, 246, 0.3);
+    pointer-events: none;
+}
+
+.joystick-ring {
+    position: absolute;
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    pointer-events: none;
+}
+
+.joystick-thumb {
+    position: absolute;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #3b82f6 0%, #1d4ed8 100%);
+    border: 2px solid #60a5fa;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6), 0 0 12px rgba(59, 130, 246, 0.5);
+    transition: transform 0.08s ease-out;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.joystick-base.active .joystick-thumb {
+    background: radial-gradient(circle at 30% 30%, #f59e0b 0%, #d97706 100%);
+    border-color: #fbbf24;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6), 0 0 15px rgba(245, 158, 11, 0.6);
+}
+
+.joystick-badge {
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+}
+
+.joystick-badge.active {
+    color: var(--color-yellow);
+    border-color: rgba(234, 179, 8, 0.4);
+}
+
+/* ============================================================================
+   HARDWARE PERFORMANCE & THERMAL SUITE STYLES
+   ============================================================================ */
+.temp-badge {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 12px;
+    display: inline-block;
+    margin-left: 6px;
+    text-transform: uppercase;
+}
+
+.temp-badge.normal {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.4);
+}
+
+.temp-badge.warm {
+    background: rgba(234, 179, 8, 0.15);
+    color: #facc15;
+    border: 1px solid rgba(234, 179, 8, 0.4);
+}
+
+.temp-badge.hot {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.5);
+    animation: pulse 1s infinite;
+}
+
+.perf-charts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-top: 15px;
+}
+
+@media (max-width: 768px) {
+    .perf-charts-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.perf-chart-box {
+    background: #090d16;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.6);
+}
+
+.perf-chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.chart-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+}
+
+.chart-value {
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+
+.chart-value.cyan {
+    color: #38bdf8;
+}
+
+.chart-value.purple {
+    color: #c084fc;
+}
+
+.perf-chart-canvas-wrapper {
+    position: relative;
+    width: 100%;
+    height: 140px;
+    background: rgba(15, 23, 42, 0.6);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.perf-chart-canvas-wrapper canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.full-grid-width {
+    grid-column: span 2;
+}
+
+.table-responsive {
+    width: 100%;
+    overflow-x: auto;
+}
+

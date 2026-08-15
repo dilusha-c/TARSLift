@@ -1,1 +1,428 @@
-/* Responsive CSS Stub */
+/* ============================================================================
+   TARSLIFT AGV - MOBILE PHONE & RESPONSIVE OPTIMIZATION CSS
+   ============================================================================ */
+
+/* ----------------------------------------------------------------------------
+   1. TABLETS & SMALL DESKTOPS (<= 900px)
+   ---------------------------------------------------------------------------- */
+@media (max-width: 900px) {
+    .app-container {
+        flex-direction: column;
+        height: 100vh;
+        height: 100dvh;
+    }
+
+    /* Off-Canvas Mobile Drawer Sidebar */
+    .sidebar {
+        position: fixed;
+        left: 0;
+        top: 60px;
+        bottom: 0;
+        width: 260px;
+        max-width: 80vw;
+        height: calc(100vh - 60px);
+        height: calc(100dvh - 60px);
+        transform: translateX(-100%);
+        z-index: 999;
+        box-shadow: 4px 0 20px rgba(0, 0, 0, 0.6);
+        background-color: var(--bg-dark);
+    }
+
+    .sidebar.open {
+        transform: translateX(0);
+    }
+
+    .main-body {
+        width: 100%;
+        height: calc(100vh - 60px);
+        height: calc(100dvh - 60px);
+    }
+
+    .topbar {
+        height: 60px;
+        padding: 0 12px;
+        gap: 10px;
+    }
+
+    .mobile-toggle-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 6px;
+        background-color: var(--bg-card);
+        border: 1px solid var(--border-color);
+    }
+
+    .topbar-title h1 {
+        font-size: 1rem;
+        white-space: nowrap;
+    }
+
+    /* Topbar status compact scroll row */
+    .topbar-status-container {
+        display: flex !important;
+        overflow-x: auto;
+        padding-bottom: 2px;
+        gap: 8px;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+    
+    .topbar-status-container::-webkit-scrollbar {
+        display: none;
+    }
+
+    .status-indicator {
+        padding: 4px 8px;
+        font-size: 0.75rem;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .content-area {
+        padding: 14px;
+    }
+
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+        gap: 14px;
+    }
+
+    .full-width {
+        grid-column: span 1;
+    }
+
+    .teach-mode-layout {
+        grid-template-columns: 1fr;
+        gap: 14px;
+    }
+
+    .system-grid {
+        grid-template-columns: 1fr !important;
+        gap: 14px;
+    }
+
+    .serial-monitor-card {
+        grid-column: span 1 !important;
+    }
+}
+
+/* ----------------------------------------------------------------------------
+   2. MOBILE PHONES (<= 640px)
+   ---------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+    .content-area {
+        padding: 10px;
+    }
+
+    .card {
+        padding: 14px;
+        margin-bottom: 14px;
+    }
+
+    .card h3 {
+        font-size: 0.82rem;
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+    }
+
+    /* Responsive Grid Metrics */
+    .card-metric-block.three-cols {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 10px;
+    }
+
+    .card-metric-block.five-cols {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 10px;
+    }
+
+    .metric .val {
+        font-size: 1.15rem;
+    }
+
+    /* System Health Grid for Phones */
+    .health-indicators-grid {
+        grid-template-columns: 1fr 1fr !important;
+        gap: 8px;
+    }
+
+    .health-item {
+        padding: 8px 10px;
+        font-size: 0.8rem;
+    }
+
+    .state-label {
+        font-size: 0.68rem;
+        padding: 1px 4px;
+    }
+
+    /* Form Rows on Phones */
+    .form-row {
+        grid-template-columns: 1fr !important;
+        gap: 10px;
+    }
+
+    .teach-metrics-row {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        padding: 10px;
+    }
+
+    /* Touch Teleoperation DPAD Controls */
+    .dpad-container {
+        width: 100%;
+        max-width: 280px;
+        margin: 15px auto 0 auto;
+    }
+
+    .dpad-row {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .dpad-btn {
+        width: 80px;
+        height: 52px;
+        font-size: 0.78rem;
+    }
+
+    .stop-btn {
+        width: 100px;
+        font-size: 0.8rem;
+    }
+
+    .button-row {
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .button-row .btn {
+        width: 100%;
+    }
+
+    /* Data Tables Mobile Overflow */
+    .table-container {
+        margin: 0 -14px;
+        padding: 0 14px;
+        width: calc(100% + 28px);
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .data-table th, .data-table td {
+        padding: 8px 10px;
+        font-size: 0.8rem;
+        white-space: nowrap;
+    }
+
+    .table-header-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .table-header-row .btn {
+        width: 100%;
+    }
+
+    /* Repeat Mode Route Selector */
+    .route-selection-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 12px;
+    }
+
+    .route-selection-bar select {
+        width: 100%;
+        min-width: 0;
+    }
+
+    /* Settings Sub-Tabs Mobile Scrollable */
+    .settings-tabs {
+        overflow-x: auto;
+        white-space: nowrap;
+        gap: 6px;
+        padding-bottom: 6px;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .settings-tab-btn {
+        padding: 8px 14px;
+        font-size: 0.82rem;
+        flex-shrink: 0;
+    }
+
+    /* Serial Monitor Mobile */
+    .serial-terminal {
+        height: 200px !important;
+        font-size: 11px !important;
+        padding: 10px !important;
+    }
+
+    #serial-command-form {
+        flex-direction: column;
+    }
+
+    #serial-command-form .btn {
+        width: 100%;
+    }
+
+    /* Mini Stats Cards */
+    .stats-row {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .stats-chart-bar {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+    }
+
+    /* Modals & Toast Containers */
+    .modal-content {
+        max-width: calc(100vw - 24px);
+        padding: 16px;
+        margin: 12px;
+    }
+
+    .toast-container {
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        max-width: calc(100vw - 24px);
+    }
+
+    /* 2D Map Canvas Mobile Optimization - Sleek Bar Layout */
+    .map-canvas-wrapper {
+        height: 310px !important;
+    }
+
+    .map-card-header {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+    }
+
+    .map-title {
+        font-size: 0.85rem;
+    }
+
+    .map-toolbar {
+        display: flex;
+        overflow-x: auto;
+        gap: 6px;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    .map-toolbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .map-btn {
+        padding: 6px 10px;
+        font-size: 0.78rem;
+        flex-shrink: 0;
+        height: 34px;
+    }
+
+    .map-top-bar {
+        top: 8px;
+        left: 8px;
+        right: 8px;
+        display: flex;
+        justify-content: center;
+    }
+
+    .coord-badge {
+        font-size: 0.72rem;
+        padding: 4px 10px;
+    }
+
+    .joystick-base {
+        width: 115px !important;
+        height: 115px !important;
+    }
+
+    .joystick-thumb {
+        width: 44px !important;
+        height: 44px !important;
+    }
+
+    /* System Info Mobile Optimization */
+    .system-grid {
+        grid-template-columns: 1fr !important;
+        gap: 14px;
+    }
+
+    .full-grid-width {
+        grid-column: span 1 !important;
+    }
+
+    .table-responsive {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .properties-table td {
+        font-size: 0.78rem !important;
+        padding: 6px 4px !important;
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    .perf-chart-box {
+        padding: 10px !important;
+    }
+
+    .perf-chart-canvas-wrapper {
+        height: 110px !important;
+    }
+
+    .serial-terminal {
+        height: 200px !important;
+        font-size: 11px !important;
+    }
+
+    #serial-command-form {
+        flex-direction: column !important;
+        gap: 8px !important;
+    }
+
+    #btn-serial-send {
+        width: 100% !important;
+    }
+}
+
+/* ----------------------------------------------------------------------------
+   3. EXTRA SMALL PHONES (<= 400px)
+   ---------------------------------------------------------------------------- */
+@media (max-width: 400px) {
+    .card-metric-block.three-cols,
+    .card-metric-block.five-cols {
+        grid-template-columns: 1fr !important;
+    }
+
+    .health-indicators-grid {
+        grid-template-columns: 1fr !important;
+    }
+
+    .topbar-title h1 {
+        font-size: 0.9rem;
+    }
+
+    .dpad-btn {
+        width: 68px;
+        height: 48px;
+        font-size: 0.72rem;
+    }
+
+    .stop-btn {
+        width: 84px;
+    }
+}

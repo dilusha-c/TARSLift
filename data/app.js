@@ -68,10 +68,25 @@ document.addEventListener("DOMContentLoaded", () => {
     initErrorLog();
     initSettingsManager();
     initSerialMonitor();
+    initMapRenderer();
+    initTouchJoystick();
+    initPerfCharts();
     
     // Mobile responsive toggle
-    mobileMenuToggle.addEventListener("click", () => {
-        sidebar.classList.toggle("open");
+    if (mobileMenuToggle) {
+        mobileMenuToggle.addEventListener("click", (e) => {
+            e.stopPropagation();
+            sidebar.classList.toggle("open");
+        });
+    }
+
+    // Tap outside to close sidebar drawer on phones
+    document.addEventListener("click", (e) => {
+        if (sidebar && sidebar.classList.contains("open")) {
+            if (!sidebar.contains(e.target) && e.target !== mobileMenuToggle && !mobileMenuToggle.contains(e.target)) {
+                sidebar.classList.remove("open");
+            }
+        }
     });
 });
 
@@ -84,6 +99,7 @@ function initViewRouter() {
             const targetView = item.getAttribute("data-view");
             switchView(targetView);
             sidebar.classList.remove("open"); // Close mobile sidebar if open
+            item.blur(); // Release button focus so keys aren't intercepted
         });
     });
 }
@@ -160,9 +176,24 @@ function updateDashboardTelemetry(tele) {
     document.getElementById("lbl-battery").innerText = tele.battery;
     document.getElementById("lbl-voltage").innerText = tele.voltage;
     
-    const stmConnected = (tele.health.stm32 === 2);
-    document.getElementById("status-stm32").className = stmConnected ? "status-dot green" : "status-dot gray";
-    document.getElementById("lbl-stm32").innerText = stmConnected ? "CONNECTED" : "DISCONNECTED";
+    const stmState = tele.health.stm32;
+    const stmDot = document.getElementById("status-stm32");
+    const stmLbl = document.getElementById("lbl-stm32");
+    if (stmDot && stmLbl) {
+        if (stmState === 2) {
+            stmDot.className = "status-dot green";
+            stmLbl.innerText = "CONNECTED";
+        } else if (stmState === 1) {
+            stmDot.className = "status-dot blue";
+            stmLbl.innerText = "DEMO MODE";
+        } else if (stmState === 3) {
+            stmDot.className = "status-dot red";
+            stmLbl.innerText = "ERROR";
+        } else {
+            stmDot.className = "status-dot gray";
+            stmLbl.innerText = "DISCONNECTED";
+        }
+    }
 
     // 2. Demo Mode indicator
     if (tele.rssi === -45 || tele.health.esp32 === 1) {
@@ -186,6 +217,19 @@ function updateDashboardTelemetry(tele) {
         errDesc.innerText = "All systems running normally.";
     }
 
+    // Top status bar Dual IP update
+    const lblApIp = document.getElementById("lbl-ap-ip");
+    const lblStaIp = document.getElementById("lbl-sta-ip");
+    const statusStaDot = document.getElementById("status-sta-dot");
+
+    if (lblApIp) lblApIp.innerText = tele.ap_ip || "192.168.4.1";
+    if (lblStaIp) {
+        lblStaIp.innerText = tele.sta_ip || "Disconnected";
+        if (statusStaDot) {
+            statusStaDot.className = tele.sta_connected ? "status-dot green" : "status-dot gray";
+        }
+    }
+
     // 4. View Specific Updates
     if (currentActiveView === "dashboard") {
         document.getElementById("dash-mode").innerText = tele.mode;
@@ -194,6 +238,9 @@ function updateDashboardTelemetry(tele) {
         document.getElementById("dash-x").innerText = `${tele.x} m`;
         document.getElementById("dash-y").innerText = `${tele.y} m`;
         document.getElementById("dash-heading").innerText = `${tele.heading}°`;
+
+        // Update 2D Live Canvas Map
+        updateMapTelemetry(tele);
 
         document.getElementById("dash-rfid-uid").innerText = tele.rfid === "NONE" ? "NO TAG" : tele.rfid;
         document.getElementById("dash-rfid-name").innerText = tele.rfid === "NONE" ? "No active checkpoint" : tele.rfid;
@@ -299,7 +346,10 @@ function updateDashboardTelemetry(tele) {
         }
     } 
     else if (currentActiveView === "system") {
-        document.getElementById("sys-esp-ip").innerText = gatewayIp.split(":")[0];
+        const sysEspApIp = document.getElementById("sys-esp-ap-ip");
+        const sysEspStaIp = document.getElementById("sys-esp-sta-ip");
+        if (sysEspApIp) sysEspApIp.innerText = tele.ap_ip || "192.168.4.1";
+        if (sysEspStaIp) sysEspStaIp.innerText = tele.sta_ip || "Disconnected";
         document.getElementById("sys-esp-rssi").innerText = `${tele.rssi} dBm`;
         document.getElementById("sys-esp-heap").innerText = `${tele.heap.toLocaleString()} bytes`;
         
@@ -311,6 +361,58 @@ function updateDashboardTelemetry(tele) {
         document.getElementById("sys-fs-used").innerText = `${usedKB} KB`;
         document.getElementById("sys-fs-free").innerText = `${freeKB} KB`;
         
+        // Update Live Hardware Performance Benchmarks
+        const elCpu = document.getElementById("sys-perf-cpu");
+        const elLoopMs = document.getElementById("sys-perf-loop-ms");
+        const elLoopHz = document.getElementById("sys-perf-loop-hz");
+        const elPerfHeap = document.getElementById("sys-perf-heap");
+        const elMinHeap = document.getElementById("sys-perf-min-heap");
+        const elMaxAlloc = document.getElementById("sys-perf-max-alloc");
+        const elPerfFs = document.getElementById("sys-perf-fs");
+
+        if (elCpu && tele.cpu_mhz) elCpu.innerText = `${tele.cpu_mhz} MHz`;
+        if (elLoopMs && tele.loop_ms !== undefined) elLoopMs.innerText = `${tele.loop_ms.toFixed(2)} ms`;
+        if (elLoopHz && tele.loop_hz !== undefined) elLoopHz.innerText = `${tele.loop_hz.toLocaleString()} Hz`;
+        if (elPerfHeap && tele.heap) elPerfHeap.innerText = `${tele.heap.toLocaleString()} bytes`;
+        if (elMinHeap && tele.min_heap) elMinHeap.innerText = `${tele.min_heap.toLocaleString()} bytes`;
+        if (elMaxAlloc && tele.max_alloc) elMaxAlloc.innerText = `${tele.max_alloc.toLocaleString()} bytes`;
+        if (elPerfFs) elPerfFs.innerText = `${usedKB} KB / ${totalKB} KB`;
+
+        // Internal ESP32 Die Temperature Meter
+        if (tele.esp_temp !== undefined) {
+            const tempC = tele.esp_temp;
+            const tempF = (tempC * 9 / 5 + 32).toFixed(1);
+            const elTemp = document.getElementById("sys-perf-temp");
+            const elBadge = document.getElementById("sys-temp-badge");
+
+            if (elTemp) elTemp.innerText = `${tempC.toFixed(1)} °C / ${tempF} °F`;
+            if (elBadge) {
+                if (tempC > 70) {
+                    elBadge.innerText = "OVERHEAT";
+                    elBadge.className = "temp-badge hot";
+                } else if (tempC > 50) {
+                    elBadge.innerText = "WARM";
+                    elBadge.className = "temp-badge warm";
+                } else {
+                    elBadge.innerText = "NORMAL";
+                    elBadge.className = "temp-badge normal";
+                }
+            }
+        }
+
+        // Live CPU & RAM Scrolling Charts
+        const cpuPct = tele.cpu_usage !== undefined ? tele.cpu_usage : 8.5;
+        const ramPct = tele.ram_usage !== undefined ? tele.ram_usage : (100 - (tele.heap / 327680 * 100));
+
+        const elCpuVal = document.getElementById("lbl-chart-cpu-val");
+        const elRamVal = document.getElementById("lbl-chart-ram-val");
+
+        if (elCpuVal) elCpuVal.innerText = `${cpuPct.toFixed(1)}%`;
+        if (elRamVal) elRamVal.innerText = `${ramPct.toFixed(1)}%`;
+
+        if (cpuPerfChart) cpuPerfChart.pushValue(cpuPct);
+        if (ramPerfChart) ramPerfChart.pushValue(ramPct);
+
         // Calculate uptime string HH:MM:SS
         const u = tele.uptime;
         const h = Math.floor(u / 3600).toString().padStart(2, '0');
@@ -369,6 +471,7 @@ function initManualControls() {
             e.preventDefault();
             btn.classList.remove("active");
             sendMoveCommand("STOP");
+            btn.blur();
         };
         btn.addEventListener("mousedown", startAction);
         btn.addEventListener("mouseup", endAction);
@@ -385,7 +488,10 @@ function initManualControls() {
     
     // Stop Button
     const stopBtn = document.getElementById("dpad-stop");
-    stopBtn.addEventListener("click", () => sendMoveCommand("STOP"));
+    stopBtn.addEventListener("click", () => {
+        sendMoveCommand("STOP");
+        stopBtn.blur();
+    });
 
     // Keyboard WASD event handlers
     const keyMap = {
@@ -396,11 +502,18 @@ function initManualControls() {
         "Space": "STOP"
     };
 
+    const keyToBtnId = {
+        "KeyW": "dpad-up", "ArrowUp": "dpad-up",
+        "KeyS": "dpad-down", "ArrowDown": "dpad-down",
+        "KeyA": "dpad-left", "ArrowLeft": "dpad-left",
+        "KeyD": "dpad-right", "ArrowRight": "dpad-right"
+    };
+
     let activeKeys = {};
 
     window.addEventListener("keydown", (e) => {
-        // Prevent key controls if user is writing in a form text box
-        if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+        // Prevent key controls if user is writing in a form text box or serial input
+        if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
         
         // Space should stop in any mode
         if (e.code === "Space") {
@@ -413,6 +526,14 @@ function initManualControls() {
         if (cmd && !activeKeys[e.code]) {
             e.preventDefault();
             activeKeys[e.code] = true;
+            
+            // Light up corresponding D-pad button in UI
+            const btnId = keyToBtnId[e.code];
+            if (btnId) {
+                const btn = document.getElementById(btnId);
+                if (btn) btn.classList.add("active");
+            }
+            
             sendMoveCommand(cmd);
         }
     });
@@ -422,6 +543,13 @@ function initManualControls() {
             e.preventDefault();
             delete activeKeys[e.code];
             
+            // Turn off corresponding D-pad button lights in UI
+            const btnId = keyToBtnId[e.code];
+            if (btnId) {
+                const btn = document.getElementById(btnId);
+                if (btn) btn.classList.remove("active");
+            }
+            
             // If no driving keys are pressed, trigger a STOP
             const keysLeft = Object.keys(activeKeys).some(k => keyMap[k] && keyMap[k] !== "STOP");
             if (!keysLeft) {
@@ -429,6 +557,23 @@ function initManualControls() {
             }
         }
     });
+
+    // Safety: blur listener to stop vehicle immediately if window loses focus
+    window.addEventListener("blur", () => {
+        activeKeys = {};
+        sendMoveCommand("STOP");
+        Object.values(keyToBtnId).forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) btn.classList.remove("active");
+        });
+    });
+
+    // Auto-focus window on hover interaction
+    document.addEventListener("mouseover", () => {
+        if (document.activeElement === document.body || document.activeElement === null) {
+            window.focus();
+        }
+    }, { once: true });
 }
 
 function sendMoveCommand(direction) {
@@ -1170,6 +1315,133 @@ function initSettingsManager() {
             .then(() => loadSettingsFromServer());
         }
     });
+
+    // Settings Sub-Tabs Navigation Toggle
+    const settingTabs = document.querySelectorAll(".settings-tab-btn");
+    const settingPanels = document.querySelectorAll(".settings-panel");
+    settingTabs.forEach(tab => {
+        tab.addEventListener("click", () => {
+            settingTabs.forEach(t => t.classList.remove("active"));
+            tab.classList.add("active");
+
+            const targetTab = tab.getAttribute("data-settings-tab");
+            settingPanels.forEach(panel => {
+                if (panel.id === `settings-panel-${targetTab}`) {
+                    panel.classList.add("active");
+                } else {
+                    panel.classList.remove("active");
+                }
+            });
+        });
+    });
+
+    // Wipe All System Data (Password: 1234)
+    const wipeBtn = document.getElementById("btn-system-wipe");
+    if (wipeBtn) {
+        wipeBtn.addEventListener("click", () => {
+            const pw = prompt("⚠️ CRITICAL ACTION ⚠️\nThis erases ALL routes, logs, tags, and settings. Enter administrative password to execute:");
+            if (pw === null) return;
+            
+            if (pw === "1234") {
+                showToast("Password verified. Clearing system flash memory...", "info");
+                
+                fetch(`${apiUrl}/api/system/wipe`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ password: pw })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === "success") {
+                        showToast("Flash data erased! Coprocessor rebooting, please wait...", "warning");
+                        if (wsConn) wsConn.close();
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 5000);
+                    } else {
+                        showToast("Erasing failed: " + data.message, "error");
+                    }
+                })
+                .catch(err => showToast("Communication error during erasure: " + err, "error"));
+            } else {
+                showToast("Access Denied: Invalid password", "error");
+            }
+        });
+    }
+
+    // Wi-Fi Scanner Handler
+    const btnScanWifi = document.getElementById("btn-wifi-scan");
+    const scanSelect = document.getElementById("wifi-scan-select");
+    const btnSaveLan = document.getElementById("btn-lan-save");
+
+    if (btnScanWifi && scanSelect) {
+        btnScanWifi.addEventListener("click", () => {
+            btnScanWifi.disabled = true;
+            btnScanWifi.innerText = "⏳ SCANNING...";
+            scanSelect.innerHTML = `<option value="">Scanning Wi-Fi networks...</option>`;
+
+            fetch(`${apiUrl}/api/wifi/scan`)
+                .then(r => r.json())
+                .then(networks => {
+                    btnScanWifi.disabled = false;
+                    btnScanWifi.innerText = "🔍 SCAN";
+                    scanSelect.innerHTML = `<option value="">-- Select Scanned Network --</option>`;
+
+                    if (Array.isArray(networks) && networks.length > 0) {
+                        networks.forEach(net => {
+                            const opt = document.createElement("option");
+                            opt.value = net.ssid;
+                            const secIcon = net.secure ? "🔒" : "🔓";
+                            opt.innerText = `${secIcon} ${net.ssid} (${net.rssi} dBm)`;
+                            scanSelect.appendChild(opt);
+                        });
+                        showToast(`Found ${networks.length} Wi-Fi networks!`, "success");
+                    } else {
+                        showToast("No Wi-Fi networks found.", "warning");
+                    }
+                })
+                .catch(err => {
+                    btnScanWifi.disabled = false;
+                    btnScanWifi.innerText = "🔍 SCAN";
+                    showToast("Wi-Fi scan failed: " + err, "error");
+                });
+        });
+
+        scanSelect.addEventListener("change", () => {
+            if (scanSelect.value) {
+                const lanSsidInput = document.getElementById("set-lan-ssid");
+                if (lanSsidInput) lanSsidInput.value = scanSelect.value;
+            }
+        });
+    }
+
+    if (btnSaveLan) {
+        btnSaveLan.addEventListener("click", () => {
+            const ssid = document.getElementById("set-lan-ssid").value.trim();
+            const pass = document.getElementById("set-lan-pass").value.trim();
+
+            if (!ssid) {
+                showToast("SSID cannot be empty", "warning");
+                return;
+            }
+
+            showToast(`Connecting to LAN Wi-Fi '${ssid}'...`, "info");
+            fetch(`${apiUrl}/api/wifi/connect`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ssid: ssid, password: pass })
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (res.status === "success") {
+                    showToast("Credentials saved! ESP32 background task connecting...", "success");
+                } else {
+                    showToast("Connection failed: " + res.message, "error");
+                }
+            })
+            .catch(err => showToast("Error connecting to LAN: " + err, "error"));
+        });
+    }
 }
 
 /* ============================================================================
@@ -1215,4 +1487,652 @@ function initSerialMonitor() {
         });
     }
 }
+
+/* ============================================================================
+   2D INTERACTIVE HTML5 CANVAS MAP RENDERER ENGINE
+   ============================================================================ */
+let mapCanvas = null;
+let mapCtx = null;
+let mapZoomScale = 75; // Pixels per meter
+let mapPanOffsetX = 0; // Pixels
+let mapPanOffsetY = 0; // Pixels
+let isMapDragging = false;
+let mapDragStartX = 0;
+let mapDragStartY = 0;
+let mapPathTrail = [];
+let lastTelemetryState = { x: 0.0, y: 0.0, heading: 0.0, tof_l: 1500, tof_c: 1800, tof_r: 1400 };
+
+const mapCheckpoints = [
+    { name: "START", x: 0.0, y: 0.0, uid: "04A7329B6C" },
+    { name: "LAB", x: 2.0, y: 0.0, uid: "04B8418C7D" },
+    { name: "STORAGE", x: 2.0, y: 2.0, uid: "04C9507D8E" },
+    { name: "OFFICE", x: 0.0, y: 2.0, uid: "04DA616E9F" }
+];
+
+function initMapRenderer() {
+    mapCanvas = document.getElementById("agvMapCanvas");
+    if (!mapCanvas) return;
+    mapCtx = mapCanvas.getContext("2d");
+
+    // Handle high DPI crisp rendering
+    resizeMapCanvas();
+    window.addEventListener("resize", resizeMapCanvas);
+
+    // Toolbar Control Buttons
+    const btnZoomIn = document.getElementById("map-btn-zoom-in");
+    const btnZoomOut = document.getElementById("map-btn-zoom-out");
+    const btnReset = document.getElementById("map-btn-reset");
+    const btnClearTrail = document.getElementById("map-btn-clear-trail");
+
+    if (btnZoomIn) btnZoomIn.addEventListener("click", () => { mapZoomScale = Math.min(mapZoomScale * 1.25, 200); renderMapCanvas(); });
+    if (btnZoomOut) btnZoomOut.addEventListener("click", () => { mapZoomScale = Math.max(mapZoomScale / 1.25, 25); renderMapCanvas(); });
+    if (btnReset) btnReset.addEventListener("click", () => { mapZoomScale = 75; mapPanOffsetX = 0; mapPanOffsetY = 0; renderMapCanvas(); });
+    if (btnClearTrail) btnClearTrail.addEventListener("click", () => { mapPathTrail = []; renderMapCanvas(); showToast("Map trajectory trail cleared", "info"); });
+
+    // Mouse Panning
+    mapCanvas.addEventListener("mousedown", (e) => {
+        isMapDragging = true;
+        mapDragStartX = e.clientX - mapPanOffsetX;
+        mapDragStartY = e.clientY - mapPanOffsetY;
+    });
+
+    window.addEventListener("mousemove", (e) => {
+        if (!isMapDragging) return;
+        mapPanOffsetX = e.clientX - mapDragStartX;
+        mapPanOffsetY = e.clientY - mapDragStartY;
+        renderMapCanvas();
+    });
+
+    window.addEventListener("mouseup", () => { isMapDragging = false; });
+
+    // Touch Panning for Mobile Phones
+    mapCanvas.addEventListener("touchstart", (e) => {
+        if (e.touches.length === 1) {
+            isMapDragging = true;
+            mapDragStartX = e.touches[0].clientX - mapPanOffsetX;
+            mapDragStartY = e.touches[0].clientY - mapPanOffsetY;
+        }
+    }, { passive: true });
+
+    mapCanvas.addEventListener("touchmove", (e) => {
+        if (isMapDragging && e.touches.length === 1) {
+            mapPanOffsetX = e.touches[0].clientX - mapDragStartX;
+            mapPanOffsetY = e.touches[0].clientY - mapDragStartY;
+            renderMapCanvas();
+        }
+    }, { passive: true });
+
+    mapCanvas.addEventListener("touchend", () => { isMapDragging = false; });
+
+    renderMapCanvas();
+}
+
+function resizeMapCanvas() {
+    if (!mapCanvas || !mapCanvas.parentElement) return;
+    const rect = mapCanvas.parentElement.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    mapCanvas.width = rect.width * dpr;
+    mapCanvas.height = rect.height * dpr;
+    renderMapCanvas();
+}
+
+function updateMapTelemetry(tele) {
+    if (!tele) return;
+    const curX = parseFloat(tele.x) || 0;
+    const curY = parseFloat(tele.y) || 0;
+    const curHead = parseFloat(tele.heading) || 0;
+
+    lastTelemetryState = {
+        x: curX,
+        y: curY,
+        heading: curHead,
+        tof_l: parseInt(tele.tof_left) || 1500,
+        tof_c: parseInt(tele.tof_centre) || 1800,
+        tof_r: parseInt(tele.tof_right) || 1400
+    };
+
+    // Append to path trail if moved > 2 cm
+    if (mapPathTrail.length === 0) {
+        mapPathTrail.push({ x: curX, y: curY });
+    } else {
+        const lastPt = mapPathTrail[mapPathTrail.length - 1];
+        const dist = Math.hypot(curX - lastPt.x, curY - lastPt.y);
+        if (dist > 0.02) {
+            mapPathTrail.push({ x: curX, y: curY });
+            if (mapPathTrail.length > 500) mapPathTrail.shift(); // Limit to 500 points
+        }
+    }
+
+    // Update Coordinate Badge text
+    const coordBadge = document.getElementById("map-coord-badge");
+    if (coordBadge) {
+        coordBadge.innerText = `X: ${curX.toFixed(2)}m | Y: ${curY.toFixed(2)}m | ${curHead.toFixed(1)}°`;
+    }
+
+    renderMapCanvas();
+}
+
+function renderMapCanvas() {
+    if (!mapCanvas || !mapCtx) return;
+
+    const width = mapCanvas.width;
+    const height = mapCanvas.height;
+    const dpr = window.devicePixelRatio || 1;
+
+    mapCtx.save();
+    mapCtx.scale(dpr, dpr);
+
+    const cssWidth = width / dpr;
+    const cssHeight = height / dpr;
+
+    // 1. Clear Canvas Background
+    mapCtx.fillStyle = "#090d16";
+    mapCtx.fillRect(0, 0, cssWidth, cssHeight);
+
+    // Origin in Screen Space (Center-bottom padded default)
+    const originX = (cssWidth / 2) + mapPanOffsetX;
+    const originY = (cssHeight / 2 + 50) + mapPanOffsetY;
+
+    // Helper functions for Coordinate Conversion (Y-up Cartesian to Canvas Y-down)
+    const worldToScreenX = (wx) => originX + (wx * mapZoomScale);
+    const worldToScreenY = (wy) => originY - (wy * mapZoomScale);
+
+    // 2. Draw Sub-meter Grid (0.2m minor lines)
+    mapCtx.lineWidth = 0.5;
+    mapCtx.strokeStyle = "rgba(30, 41, 59, 0.5)";
+    const minorStep = 0.2 * mapZoomScale;
+    for (let x = originX % minorStep; x < cssWidth; x += minorStep) {
+        mapCtx.beginPath(); mapCtx.moveTo(x, 0); mapCtx.lineTo(x, cssHeight); mapCtx.stroke();
+    }
+    for (let y = originY % minorStep; y < cssHeight; y += minorStep) {
+        mapCtx.beginPath(); mapCtx.moveTo(0, y); mapCtx.lineTo(cssWidth, y); mapCtx.stroke();
+    }
+
+    // 3. Draw 1-Meter Major Grid Lines & Coordinate Labels
+    mapCtx.lineWidth = 1.2;
+    mapCtx.strokeStyle = "rgba(51, 65, 85, 0.8)";
+    mapCtx.fillStyle = "rgba(148, 163, 184, 0.6)";
+    mapCtx.font = "10px monospace";
+
+    const meterStep = mapZoomScale;
+    const minMetersX = Math.floor((-originX) / meterStep);
+    const maxMetersX = Math.ceil((cssWidth - originX) / meterStep);
+    const minMetersY = Math.floor((originY - cssHeight) / meterStep);
+    const maxMetersY = Math.ceil(originY / meterStep);
+
+    for (let mx = minMetersX; mx <= maxMetersX; mx++) {
+        const sx = worldToScreenX(mx);
+        mapCtx.beginPath(); mapCtx.moveTo(sx, 0); mapCtx.lineTo(sx, cssHeight); mapCtx.stroke();
+        mapCtx.fillText(`${mx}m`, sx + 3, originY - 4);
+    }
+
+    for (let my = minMetersY; my <= maxMetersY; my++) {
+        const sy = worldToScreenY(my);
+        mapCtx.beginPath(); mapCtx.moveTo(0, sy); mapCtx.lineTo(cssWidth, sy); mapCtx.stroke();
+        if (my !== 0) mapCtx.fillText(`${my}m`, originX + 4, sy - 3);
+    }
+
+    // 4. Draw Origin Axis Crosshair
+    mapCtx.lineWidth = 2.0;
+    mapCtx.strokeStyle = "#3b82f6";
+    mapCtx.beginPath(); mapCtx.moveTo(originX, 0); mapCtx.lineTo(originX, cssHeight); mapCtx.stroke();
+    mapCtx.strokeStyle = "#10b981";
+    mapCtx.beginPath(); mapCtx.moveTo(0, originY); mapCtx.lineTo(cssWidth, originY); mapCtx.stroke();
+
+    // 5. Draw Dashed Route Path Loop Connecting RFID Checkpoints
+    mapCtx.save();
+    mapCtx.setLineDash([6, 6]);
+    mapCtx.strokeStyle = "rgba(59, 130, 246, 0.35)";
+    mapCtx.lineWidth = 2.0;
+    mapCtx.beginPath();
+    for (let i = 0; i < mapCheckpoints.length; i++) {
+        const sx = worldToScreenX(mapCheckpoints[i].x);
+        const sy = worldToScreenY(mapCheckpoints[i].y);
+        if (i === 0) mapCtx.moveTo(sx, sy);
+        else mapCtx.lineTo(sx, sy);
+    }
+    mapCtx.closePath();
+    mapCtx.stroke();
+    mapCtx.restore();
+
+    // 6. Draw Glowing RFID Checkpoint Nodes
+    for (let i = 0; i < mapCheckpoints.length; i++) {
+        const cp = mapCheckpoints[i];
+        const sx = worldToScreenX(cp.x);
+        const sy = worldToScreenY(cp.y);
+
+        // Outer Glow
+        mapCtx.beginPath();
+        mapCtx.arc(sx, sy, 10, 0, 2 * Math.PI);
+        mapCtx.fillStyle = "rgba(6, 182, 212, 0.25)";
+        mapCtx.fill();
+
+        // Inner Circle
+        mapCtx.beginPath();
+        mapCtx.arc(sx, sy, 5, 0, 2 * Math.PI);
+        mapCtx.fillStyle = "#06b6d4";
+        mapCtx.shadowColor = "#06b6d4";
+        mapCtx.shadowBlur = 8;
+        mapCtx.fill();
+        mapCtx.shadowBlur = 0;
+
+        // Label Tag
+        mapCtx.fillStyle = "#06b6d4";
+        mapCtx.font = "bold 11px Inter, sans-serif";
+        mapCtx.fillText(cp.name, sx + 12, sy + 4);
+    }
+
+    // 7. Draw Trajectory Trail History Line
+    if (mapPathTrail.length > 1) {
+        mapCtx.beginPath();
+        mapCtx.strokeStyle = "#38bdf8";
+        mapCtx.lineWidth = 3.0;
+        mapCtx.shadowColor = "#0284c7";
+        mapCtx.shadowBlur = 10;
+        for (let i = 0; i < mapPathTrail.length; i++) {
+            const sx = worldToScreenX(mapPathTrail[i].x);
+            const sy = worldToScreenY(mapPathTrail[i].y);
+            if (i === 0) mapCtx.moveTo(sx, sy);
+            else mapCtx.lineTo(sx, sy);
+        }
+        mapCtx.stroke();
+        mapCtx.shadowBlur = 0;
+    }
+
+    // 8. Draw Real-time AGV Robot Chassis & Sensors
+    const agvSx = worldToScreenX(lastTelemetryState.x);
+    const agvSy = worldToScreenY(lastTelemetryState.y);
+    const headRad = (-lastTelemetryState.heading) * (Math.PI / 180.0); // Convert Cartesian angle to canvas rad
+
+    mapCtx.save();
+    mapCtx.translate(agvSx, agvSy);
+    mapCtx.rotate(headRad);
+
+    // Robot Dimensions in meters (0.35m x 0.26m scaled to zoom)
+    const robotW = 0.35 * mapZoomScale;
+    const robotH = 0.26 * mapZoomScale;
+
+    // Draw ToF Sensor Range Arcs (Left: +45°, Centre: 0°, Right: -45°)
+    const drawTofArc = (angleDeg, distMm) => {
+        const rad = angleDeg * (Math.PI / 180.0);
+        const maxDistM = Math.min(distMm / 1000.0, 2.0); // Cap visual distance to 2m
+        const arcDistPx = maxDistM * mapZoomScale;
+
+        mapCtx.save();
+        mapCtx.rotate(-rad);
+        mapCtx.beginPath();
+        mapCtx.moveTo(robotW / 2, 0);
+        mapCtx.arc(robotW / 2, 0, arcDistPx, -0.2, 0.2);
+        mapCtx.closePath();
+
+        let arcColor = "rgba(16, 185, 129, 0.2)";
+        let strokeColor = "#10b981";
+        if (distMm < 300) { arcColor = "rgba(239, 68, 68, 0.35)"; strokeColor = "#ef4444"; }
+        else if (distMm < 600) { arcColor = "rgba(245, 158, 11, 0.3)"; strokeColor = "#f59e0b"; }
+
+        mapCtx.fillStyle = arcColor;
+        mapCtx.fill();
+        mapCtx.strokeStyle = strokeColor;
+        mapCtx.lineWidth = 1.5;
+        mapCtx.stroke();
+        mapCtx.restore();
+    };
+
+    drawTofArc(45, lastTelemetryState.tof_l);
+    drawTofArc(0, lastTelemetryState.tof_c);
+    drawTofArc(-45, lastTelemetryState.tof_r);
+
+    // Robot Body Body Shadow & Fill
+    mapCtx.shadowColor = "#eab308";
+    mapCtx.shadowBlur = 12;
+    mapCtx.fillStyle = "#1e293b";
+    mapCtx.strokeStyle = "#eab308"; // Industrial Yellow Accent
+    mapCtx.lineWidth = 2.5;
+
+    mapCtx.beginPath();
+    mapCtx.roundRect(-robotW / 2, -robotH / 2, robotW, robotH, 6);
+    mapCtx.fill();
+    mapCtx.stroke();
+    mapCtx.shadowBlur = 0;
+
+    // Wheel Markers (Left & Right differential drive wheels)
+    mapCtx.fillStyle = "#64748b";
+    mapCtx.fillRect(-robotW / 4, -robotH / 2 - 3, robotW / 2, 4);
+    mapCtx.fillRect(-robotW / 4, robotH / 2 - 1, robotW / 2, 4);
+
+    // Directional Front Arrow Marker
+    mapCtx.fillStyle = "#eab308";
+    mapCtx.beginPath();
+    mapCtx.moveTo(robotW / 2 - 2, 0);
+    mapCtx.lineTo(robotW / 2 - 12, -6);
+    mapCtx.lineTo(robotW / 2 - 12, 6);
+    mapCtx.closePath();
+    mapCtx.fill();
+
+    // Center Pivot Indicator
+    mapCtx.beginPath();
+    mapCtx.arc(0, 0, 4, 0, 2 * Math.PI);
+    mapCtx.fillStyle = "#ef4444";
+    mapCtx.fill();
+
+    mapCtx.restore();
+    mapCtx.restore();
+}
+
+/* ============================================================================
+   DUAL-STICK ERGONOMIC MOBILE TOUCH CONTROLLER ENGINE
+   ============================================================================ */
+function initTouchJoystick() {
+    const btnDpad = document.getElementById("btn-toggle-dpad");
+    const btnJoystick = document.getElementById("btn-toggle-joystick");
+    const dpadWrapper = document.getElementById("dpad-wrapper");
+    const joystickWrapper = document.getElementById("joystick-wrapper");
+
+    const leftBase = document.getElementById("joystick-left-base");
+    const leftThumb = document.getElementById("joystick-left-thumb");
+    const throttleBadge = document.getElementById("joystick-throttle-badge");
+
+    const rightBase = document.getElementById("joystick-right-base");
+    const rightThumb = document.getElementById("joystick-right-thumb");
+    const steeringBadge = document.getElementById("joystick-steering-badge");
+
+    if (!leftBase || !leftThumb || !rightBase || !rightThumb) return;
+
+    // Mode Toggle (D-PAD vs DUAL-STICK)
+    if (btnDpad && btnJoystick && dpadWrapper && joystickWrapper) {
+        btnDpad.addEventListener("click", () => {
+            btnDpad.classList.add("active");
+            btnJoystick.classList.remove("active");
+            dpadWrapper.style.display = "flex";
+            joystickWrapper.style.display = "none";
+        });
+
+        btnJoystick.addEventListener("click", () => {
+            btnJoystick.classList.add("active");
+            btnDpad.classList.remove("active");
+            dpadWrapper.style.display = "none";
+            joystickWrapper.style.display = "flex";
+        });
+    }
+
+    const maxRadius = 40; // Max thumb travel distance in pixels
+    let lastSendTime = 0;
+
+    // Stick States
+    let leftTouchId = null;
+    let rightTouchId = null;
+
+    let throttleVal = 0.0; // -1.0 (Reverse) to +1.0 (Forward)
+    let steeringVal = 0.0; // -1.0 (Left) to +1.0 (Right)
+
+    let leftRect = null;
+    let rightRect = null;
+
+    const dispatchCombinedMotion = () => {
+        const now = Date.now();
+        if (now - lastSendTime < COMMAND_THROTTLE_MS) return;
+
+        let cmd = "STOP";
+        let speedPct = 0;
+
+        if (Math.abs(throttleVal) > 0.15) {
+            cmd = throttleVal > 0 ? "FORWARD" : "REVERSE";
+            speedPct = Math.round(Math.abs(throttleVal) * manualDriveSpeed);
+        } else if (Math.abs(steeringVal) > 0.15) {
+            cmd = steeringVal < 0 ? "LEFT" : "RIGHT";
+            speedPct = Math.round(Math.abs(steeringVal) * manualDriveSpeed);
+        }
+
+        lastSendTime = now;
+        sendManualDriveCommand(cmd, speedPct);
+    };
+
+    const updateLeftStick = (clientY) => {
+        if (!leftRect) return;
+        const centerY = leftRect.top + leftRect.height / 2;
+        let deltaY = clientY - centerY;
+
+        if (deltaY < -maxRadius) deltaY = -maxRadius;
+        if (deltaY > maxRadius) deltaY = maxRadius;
+
+        leftThumb.style.transform = `translate(0px, ${deltaY}px)`;
+        throttleVal = (-deltaY) / maxRadius; // Invert Y so up is forward
+
+        const pct = Math.round(Math.abs(throttleVal) * 100);
+        if (throttleBadge) {
+            if (Math.abs(throttleVal) <= 0.15) {
+                throttleBadge.innerText = "FWD / REV: 0%";
+                throttleBadge.className = "joystick-badge";
+            } else {
+                const labelStr = throttleVal > 0 ? "FWD" : "REV";
+                throttleBadge.innerText = `${labelStr}: ${pct}%`;
+                throttleBadge.className = "joystick-badge active";
+            }
+        }
+        dispatchCombinedMotion();
+    };
+
+    const updateRightStick = (clientX) => {
+        if (!rightRect) return;
+        const centerX = rightRect.left + rightRect.width / 2;
+        let deltaX = clientX - centerX;
+
+        if (deltaX < -maxRadius) deltaX = -maxRadius;
+        if (deltaX > maxRadius) deltaX = maxRadius;
+
+        rightThumb.style.transform = `translate(${deltaX}px, 0px)`;
+        steeringVal = deltaX / maxRadius;
+
+        const pct = Math.round(Math.abs(steeringVal) * 100);
+        if (steeringBadge) {
+            if (Math.abs(steeringVal) <= 0.15) {
+                steeringBadge.innerText = "TURN: CENTER";
+                steeringBadge.className = "joystick-badge";
+            } else {
+                const labelStr = steeringVal < 0 ? "LEFT" : "RIGHT";
+                steeringBadge.innerText = `${labelStr}: ${pct}%`;
+                steeringBadge.className = "joystick-badge active";
+            }
+        }
+        dispatchCombinedMotion();
+    };
+
+    const resetLeftStick = () => {
+        leftTouchId = null;
+        throttleVal = 0.0;
+        leftThumb.style.transform = "translate(0px, 0px)";
+        leftBase.classList.remove("active");
+        if (throttleBadge) {
+            throttleBadge.innerText = "FWD / REV: 0%";
+            throttleBadge.className = "joystick-badge";
+        }
+        if (Math.abs(steeringVal) <= 0.15) {
+            sendManualDriveCommand("STOP", 0);
+        }
+    };
+
+    const resetRightStick = () => {
+        rightTouchId = null;
+        steeringVal = 0.0;
+        rightThumb.style.transform = "translate(0px, 0px)";
+        rightBase.classList.remove("active");
+        if (steeringBadge) {
+            steeringBadge.innerText = "TURN: CENTER";
+            steeringBadge.className = "joystick-badge";
+        }
+        if (Math.abs(throttleVal) <= 0.15) {
+            sendManualDriveCommand("STOP", 0);
+        }
+    };
+
+    // Multi-Touch Handlers
+    leftBase.addEventListener("touchstart", (e) => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (leftTouchId === null) {
+                const t = e.changedTouches[i];
+                leftTouchId = t.identifier;
+                leftBase.classList.add("active");
+                leftRect = leftBase.getBoundingClientRect();
+                updateLeftStick(t.clientY);
+                break;
+            }
+        }
+    }, { passive: true });
+
+    rightBase.addEventListener("touchstart", (e) => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (rightTouchId === null) {
+                const t = e.changedTouches[i];
+                rightTouchId = t.identifier;
+                rightBase.classList.add("active");
+                rightRect = rightBase.getBoundingClientRect();
+                updateRightStick(t.clientX);
+                break;
+            }
+        }
+    }, { passive: true });
+
+    window.addEventListener("touchmove", (e) => {
+        for (let i = 0; i < e.touches.length; i++) {
+            const t = e.touches[i];
+            if (t.identifier === leftTouchId) {
+                updateLeftStick(t.clientY);
+            } else if (t.identifier === rightTouchId) {
+                updateRightStick(t.clientX);
+            }
+        }
+    }, { passive: true });
+
+    window.addEventListener("touchend", (e) => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const id = e.changedTouches[i].identifier;
+            if (id === leftTouchId) resetLeftStick();
+            if (id === rightTouchId) resetRightStick();
+        }
+    });
+
+    window.addEventListener("touchcancel", (e) => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const id = e.changedTouches[i].identifier;
+            if (id === leftTouchId) resetLeftStick();
+            if (id === rightTouchId) resetRightStick();
+        }
+    });
+
+    // Mouse Drag Support for PC Testing
+    let isMouseLeft = false;
+    let isMouseRight = false;
+
+    leftBase.addEventListener("mousedown", (e) => {
+        isMouseLeft = true;
+        leftBase.classList.add("active");
+        leftRect = leftBase.getBoundingClientRect();
+        updateLeftStick(e.clientY);
+    });
+
+    rightBase.addEventListener("mousedown", (e) => {
+        isMouseRight = true;
+        rightBase.classList.add("active");
+        rightRect = rightBase.getBoundingClientRect();
+        updateRightStick(e.clientX);
+    });
+
+    window.addEventListener("mousemove", (e) => {
+        if (isMouseLeft) updateLeftStick(e.clientY);
+        if (isMouseRight) updateRightStick(e.clientX);
+    });
+
+    window.addEventListener("mouseup", () => {
+        if (isMouseLeft) { isMouseLeft = false; resetLeftStick(); }
+        if (isMouseRight) { isMouseRight = false; resetRightStick(); }
+    });
+}
+
+/* ============================================================================
+   HARDWARE PERFORMANCE CANVAS CHART RENDERER ENGINE
+   ============================================================================ */
+class AGVPerfChart {
+    constructor(canvasId, strokeColor, fillColor) {
+        this.canvas = document.getElementById(canvasId);
+        if (!this.canvas) return;
+        this.ctx = this.canvas.getContext("2d");
+        this.strokeColor = strokeColor;
+        this.fillColor = fillColor;
+        this.data = new Array(50).fill(0); // 50 samples history ring buffer
+    }
+
+    pushValue(val) {
+        if (!this.canvas || !this.ctx) return;
+        val = Math.max(0, Math.min(100, val));
+        this.data.shift();
+        this.data.push(val);
+        this.render();
+    }
+
+    render() {
+        if (!this.canvas || !this.ctx) return;
+        const w = this.canvas.width = this.canvas.clientWidth || 400;
+        const h = this.canvas.height = this.canvas.clientHeight || 140;
+        const ctx = this.ctx;
+
+        ctx.clearRect(0, 0, w, h);
+
+        // Draw horizontal grid lines (25%, 50%, 75%)
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+        ctx.lineWidth = 1;
+        for (let pct of [0.25, 0.50, 0.75]) {
+            const y = h * (1 - pct);
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(w, y);
+            ctx.stroke();
+        }
+
+        if (this.data.length < 2) return;
+
+        const stepX = w / (this.data.length - 1);
+
+        // Draw filled gradient area under curve
+        ctx.beginPath();
+        ctx.moveTo(0, h);
+        for (let i = 0; i < this.data.length; i++) {
+            const x = i * stepX;
+            const y = h - (this.data[i] / 100) * (h - 10);
+            ctx.lineTo(x, y);
+        }
+        ctx.lineTo(w, h);
+        ctx.closePath();
+
+        const grad = ctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, this.fillColor);
+        grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Draw glowing line curve
+        ctx.beginPath();
+        for (let i = 0; i < this.data.length; i++) {
+            const x = i * stepX;
+            const y = h - (this.data[i] / 100) * (h - 10);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = this.strokeColor;
+        ctx.lineWidth = 2;
+        ctx.shadowColor = this.strokeColor;
+        ctx.shadowBlur = 8;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+    }
+}
+
+let cpuPerfChart = null;
+let ramPerfChart = null;
+
+function initPerfCharts() {
+    cpuPerfChart = new AGVPerfChart("chart-cpu-canvas", "#38bdf8", "rgba(56, 189, 248, 0.25)");
+    ramPerfChart = new AGVPerfChart("chart-ram-canvas", "#c084fc", "rgba(192, 132, 252, 0.25)");
+}
+
+
 

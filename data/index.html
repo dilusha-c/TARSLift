@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TARSLIFT AGV Dashboard</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="css/responsive.css">
 </head>
 <body>
     <!-- App Layout Container -->
@@ -76,6 +77,12 @@
                     <div class="status-indicator">
                         <span class="status-dot gray" id="status-stm32"></span>
                         <span class="status-label">STM32: <b id="lbl-stm32">DISCONNECTED</b></span>
+                    <div class="status-indicator">
+                        <span class="status-label">AP: <b id="lbl-ap-ip">192.168.4.1</b></span>
+                    </div>
+                    <div class="status-indicator">
+                        <span class="status-dot gray" id="status-sta-dot"></span>
+                        <span class="status-label">STA: <b id="lbl-sta-ip">Disconnected</b></span>
                     </div>
                     <div class="status-indicator">
                         <span class="status-label">MODE: <span class="mode-badge idle" id="lbl-mode">IDLE</span></span>
@@ -125,6 +132,28 @@
                                     <label>Heading</label>
                                     <span class="val" id="dash-heading">0.0°</span>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- 2D Interactive Map Card -->
+                        <div class="card map-card full-width">
+                            <div class="map-card-header">
+                                <h3 class="map-title">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="map-icon"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+                                    LIVE AGV LOCATION & TRAJECTORY MAP
+                                </h3>
+                                <div class="map-toolbar">
+                                    <button class="map-btn" id="map-btn-zoom-in" title="Zoom In">+</button>
+                                    <button class="map-btn" id="map-btn-zoom-out" title="Zoom Out">−</button>
+                                    <button class="map-btn" id="map-btn-reset" title="Reset View">↺ Reset</button>
+                                    <button class="map-btn danger" id="map-btn-clear-trail" title="Clear Path Trail">Clear Trail</button>
+                                </div>
+                            </div>
+                            <div class="map-canvas-wrapper">
+                                <div class="map-top-bar">
+                                    <span class="coord-badge" id="map-coord-badge">X: 0.00m | Y: 0.00m | 0.0°</span>
+                                </div>
+                                <canvas id="agvMapCanvas" width="800" height="420"></canvas>
                             </div>
                         </div>
 
@@ -279,8 +308,14 @@
 
                         <!-- Manual drive controls -->
                         <div class="manual-drive card">
-                            <h3>MANUAL TELEOPERATION</h3>
-                            <p class="section-hint">Drive using WASD / Arrow keys on keyboard (active when recording or in IDLE), or use the touch buttons below.</p>
+                            <div class="manual-drive-header">
+                                <h3>MANUAL TELEOPERATION</h3>
+                                <div class="control-mode-toggle">
+                                    <button class="toggle-btn active" id="btn-toggle-dpad">D-PAD</button>
+                                    <button class="toggle-btn" id="btn-toggle-joystick">360° JOYSTICK</button>
+                                </div>
+                            </div>
+                            <p class="section-hint">Drive using WASD / Arrow keys, touchscreen D-Pad, or 360° Touch Joystick below.</p>
                             
                             <div class="speed-slider-container">
                                 <label>Driving Speed: <b id="lbl-speed-pct">50%</b></label>
@@ -288,7 +323,7 @@
                             </div>
 
                             <!-- On-screen directional pad -->
-                            <div class="dpad-container">
+                            <div class="dpad-container" id="dpad-wrapper">
                                 <div class="dpad-row">
                                     <button class="btn dpad-btn" id="dpad-up">W / UP</button>
                                 </div>
@@ -299,6 +334,31 @@
                                 </div>
                                 <div class="dpad-row">
                                     <button class="btn dpad-btn" id="dpad-down">S / DOWN</button>
+                                </div>
+                            </div>
+
+                            <!-- Dual-Stick Ergonomic Touch Joysticks Container -->
+                            <div class="joystick-wrapper" id="joystick-wrapper" style="display: none;">
+                                <div class="dual-joysticks-container">
+                                    <!-- Left Stick: Throttle (Forward / Reverse) -->
+                                    <div class="joystick-column">
+                                        <span class="stick-title">LEFT: THROTTLE</span>
+                                        <div class="joystick-base" id="joystick-left-base">
+                                            <div class="joystick-axis-y"></div>
+                                            <div class="joystick-thumb" id="joystick-left-thumb"></div>
+                                        </div>
+                                        <span class="joystick-badge" id="joystick-throttle-badge">FWD / REV: 0%</span>
+                                    </div>
+
+                                    <!-- Right Stick: Steering (Left / Right) -->
+                                    <div class="joystick-column">
+                                        <span class="stick-title">RIGHT: STEERING</span>
+                                        <div class="joystick-base" id="joystick-right-base">
+                                            <div class="joystick-axis-x"></div>
+                                            <div class="joystick-thumb" id="joystick-right-thumb"></div>
+                                        </div>
+                                        <span class="joystick-badge" id="joystick-steering-badge">TURN: CENTER</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -530,33 +590,79 @@
                         <!-- ESP32-S3 Module -->
                         <div class="card">
                             <h3>ESP32-S3 DIAGNOSTICS</h3>
-                            <table class="properties-table">
-                                <tr><td>Firmware Version</td><td>v1.0.0-release</td></tr>
-                                <tr><td>IP Address</td><td id="sys-esp-ip">192.168.4.1</td></tr>
-                                <tr><td>Wi-Fi Access SSID</td><td id="sys-esp-ssid">TARSLIFT_AGV</td></tr>
-                                <tr><td>RSSI Signal Strength</td><td id="sys-esp-rssi">-45 dBm</td></tr>
-                                <tr><td>Free Heap Allocator</td><td id="sys-esp-heap">184,240 bytes</td></tr>
-                                <tr><td>LittleFS Size (Total)</td><td id="sys-fs-total">2,048 KB</td></tr>
-                                <tr><td>LittleFS Size (Used)</td><td id="sys-fs-used">48 KB</td></tr>
-                                <tr><td>LittleFS Size (Free)</td><td id="sys-fs-free">2,000 KB</td></tr>
-                                <tr><td>Uptime Counter</td><td id="sys-esp-uptime">00:00:00</td></tr>
-                            </table>
+                            <div class="table-responsive">
+                                <table class="properties-table">
+                                    <tr><td>Firmware Version</td><td>v1.0.0-release</td></tr>
+                                    <tr><td>AP Hotspot IP</td><td id="sys-esp-ap-ip">192.168.4.1</td></tr>
+                                    <tr><td>Local LAN STA IP</td><td id="sys-esp-sta-ip">Disconnected</td></tr>
+                                    <tr><td>Wi-Fi Access SSID</td><td id="sys-esp-ssid">TARSLIFT_AGV</td></tr>
+                                    <tr><td>RSSI Signal Strength</td><td id="sys-esp-rssi">-45 dBm</td></tr>
+                                    <tr><td>Free Heap Allocator</td><td id="sys-esp-heap">184,240 bytes</td></tr>
+                                    <tr><td>LittleFS Size (Total)</td><td id="sys-fs-total">2,048 KB</td></tr>
+                                    <tr><td>LittleFS Size (Used)</td><td id="sys-fs-used">48 KB</td></tr>
+                                    <tr><td>LittleFS Size (Free)</td><td id="sys-fs-free">2,000 KB</td></tr>
+                                    <tr><td>Uptime Counter</td><td id="sys-esp-uptime">00:00:00</td></tr>
+                                </table>
+                            </div>
                         </div>
 
                         <!-- STM32 Driver Module -->
                         <div class="card">
                             <h3>STM32F103 COPROCESSOR</h3>
-                            <table class="properties-table">
-                                <tr><td>Coprocessor Sync</td><td id="sys-stm-conn">CONNECTED</td></tr>
-                                <tr><td>UART Hardware Bus</td><td id="sys-stm-uart">UART2 (Active)</td></tr>
-                                <tr><td>Baud Rate Speed</td><td id="sys-stm-baud">115,200 bps</td></tr>
-                                <tr><td>Last Received Packet</td><td id="sys-stm-packet">0x04 (Telemetry)</td></tr>
-                                <tr><td>Last Received Time</td><td id="sys-stm-time">09:31:07</td></tr>
-                            </table>
+                            <div class="table-responsive">
+                                <table class="properties-table">
+                                    <tr><td>Coprocessor Sync</td><td id="sys-stm-conn">CONNECTED</td></tr>
+                                    <tr><td>UART Hardware Bus</td><td id="sys-stm-uart">UART2 (Active)</td></tr>
+                                    <tr><td>Baud Rate Speed</td><td id="sys-stm-baud">115,200 bps</td></tr>
+                                    <tr><td>Last Received Packet</td><td id="sys-stm-packet">0x04 (Telemetry)</td></tr>
+                                    <tr><td>Last Received Time</td><td id="sys-stm-time">09:31:07</td></tr>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- ESP32-S3 Performance Benchmarks & Thermal Suite Card -->
+                        <div class="card perf-card full-grid-width">
+                            <h3>⚡ ESP32-S3 REAL-TIME PERFORMANCE & THERMAL BENCHMARKS</h3>
+                            <div class="table-responsive" style="margin-bottom: 20px;">
+                                <table class="properties-table">
+                                    <tr><td>CPU Speed & Architecture</td><td><b id="sys-perf-cpu">240 MHz</b> (Dual-Core Tensilica LX7)</td></tr>
+                                    <tr><td>ESP32 Chip Die Temperature</td><td><b id="sys-perf-temp">38.5 °C / 101.3 °F</b> (<span id="sys-temp-badge" class="temp-badge normal">NORMAL</span>)</td></tr>
+                                    <tr><td>Main Loop Execution Latency</td><td><b id="sys-perf-loop-ms">0.35 ms</b> (<span id="sys-perf-loop-hz">2,850 Hz</span>)</td></tr>
+                                    <tr><td>Current Free DRAM Heap</td><td><b id="sys-perf-heap">245,820 bytes</b></td></tr>
+                                    <tr><td>Lowest Heap Watermark (Min)</td><td><b id="sys-perf-min-heap">210,480 bytes</b></td></tr>
+                                    <tr><td>Max Allocatable Block</td><td><b id="sys-perf-max-alloc">110,500 bytes</b></td></tr>
+                                    <tr><td>LittleFS Storage Used</td><td><b id="sys-perf-fs">36.9 KB / 1,536 KB</b></td></tr>
+                                </table>
+                            </div>
+
+                            <!-- Real-Time Dual Scrolling Canvas Graphs -->
+                            <div class="perf-charts-grid">
+                                <!-- CPU Usage Chart -->
+                                <div class="perf-chart-box">
+                                    <div class="perf-chart-header">
+                                        <span class="chart-title">💻 CPU LOAD UTILIZATION</span>
+                                        <span class="chart-value cyan" id="lbl-chart-cpu-val">8.5%</span>
+                                    </div>
+                                    <div class="perf-chart-canvas-wrapper">
+                                        <canvas id="chart-cpu-canvas" width="400" height="140"></canvas>
+                                    </div>
+                                </div>
+
+                                <!-- RAM Usage Chart -->
+                                <div class="perf-chart-box">
+                                    <div class="perf-chart-header">
+                                        <span class="chart-title">🧠 RAM MEMORY CONSUMPTION</span>
+                                        <span class="chart-value purple" id="lbl-chart-ram-val">25.4%</span>
+                                    </div>
+                                    <div class="perf-chart-canvas-wrapper">
+                                        <canvas id="chart-ram-canvas" width="400" height="140"></canvas>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Serial Monitor Card -->
-                        <div class="card serial-monitor-card" style="grid-column: span 2;">
+                        <div class="card serial-monitor-card full-grid-width">
                             <div class="serial-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                                 <h3>📟 SERIAL MONITOR</h3>
                                 <button class="btn btn-outline" id="btn-serial-clear" style="padding: 4px 10px; font-size: 12px;">CLEAR CONSOLE</button>
@@ -577,243 +683,300 @@
                     <div class="settings-layout card">
                         <h3>⚙ SYSTEM CONFIGURATION SETTINGS</h3>
                         
-                        <div class="settings-section">
-                            <h4>Test Profile Selection</h4>
-                            <div class="form-group">
-                                <label>Current Test Profile</label>
-                                <select id="set-test-profile">
-                                    <option value="0">CUSTOM</option>
-                                    <option value="1">MOTOR TEST</option>
-                                    <option value="2">ENCODER TEST</option>
-                                    <option value="3">MPU6050 TEST</option>
-                                    <option value="4">RFID TEST</option>
-                                    <option value="5">TOF TEST</option>
-                                    <option value="6">BATTERY TEST</option>
-                                    <option value="7">TEACH TEST</option>
-                                    <option value="8">REPEAT TEST</option>
-                                    <option value="9">FULL SYSTEM</option>
-                                </select>
-                            </div>
+                        <!-- Settings Sub-Tabs -->
+                        <div class="settings-tabs">
+                            <button class="settings-tab-btn active" data-settings-tab="profiles">Profiles & Flags</button>
+                            <button class="settings-tab-btn" data-settings-tab="battery">Battery Settings</button>
+                            <button class="settings-tab-btn" data-settings-tab="system-ap">System & Access Point</button>
                         </div>
 
-                        <div class="settings-section" id="sec-dashboard-features">
-                            <h4>Dashboard Features</h4>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-feat-dashboard">
-                                    <label for="set-feat-dashboard">Dashboard</label>
-                                </div>
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-feat-teach">
-                                    <label for="set-feat-teach">Teach Mode</label>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-feat-repeat">
-                                    <label for="set-feat-repeat">Repeat Mode</label>
-                                </div>
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-feat-manual">
-                                    <label for="set-feat-manual">Manual Control</label>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-feat-routes">
-                                    <label for="set-feat-routes">Route Manager</label>
-                                </div>
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-feat-rfid">
-                                    <label for="set-feat-rfid">RFID Manager</label>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-feat-errors">
-                                    <label for="set-feat-errors">Error Log</label>
-                                </div>
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-feat-system">
-                                    <label for="set-feat-system">System Information</label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="settings-section" id="sec-communication">
-                            <h4>Communication</h4>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-comm-uart">
-                                    <label for="set-comm-uart">STM32 UART</label>
-                                </div>
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-comm-ws">
-                                    <label for="set-comm-ws">WebSocket</label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="settings-section" id="sec-motion">
-                            <h4>Motion</h4>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-mot-control">
-                                    <label for="set-mot-control">Motor Control</label>
-                                </div>
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-mot-encoder">
-                                    <label for="set-mot-encoder">Encoder</label>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-mot-mpu">
-                                    <label for="set-mot-mpu">MPU6050</label>
-                                </div>
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-mot-pid">
-                                    <label for="set-mot-pid">PID / Motion Control</label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="settings-section" id="sec-rfid">
-                            <h4>RFID</h4>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-rfid-reader">
-                                    <label for="set-rfid-reader">RFID Reader</label>
-                                </div>
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-rfid-mgr">
-                                    <label for="set-rfid-mgr">RFID Manager</label>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-rfid-cps">
-                                    <label for="set-rfid-cps">RFID Checkpoints</label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="settings-section" id="sec-obstacle">
-                            <h4>Obstacle</h4>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-tof-sensors">
-                                    <label for="set-tof-sensors">ToF Sensors</label>
-                                </div>
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-tof-obstacle">
-                                    <label for="set-tof-obstacle">Obstacle Detection</label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="settings-section" id="sec-battery">
-                            <h4>Battery</h4>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-bat-mon">
-                                    <label for="set-bat-mon">Battery Monitoring</label>
-                                </div>
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-bat-ina">
-                                    <label for="set-bat-ina">INA219</label>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-bat-volt">
-                                    <label for="set-bat-volt">Voltage</label>
-                                </div>
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-bat-curr">
-                                    <label for="set-bat-curr">Current</label>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-bat-power">
-                                    <label for="set-bat-power">Power</label>
-                                </div>
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-bat-pct">
-                                    <label for="set-bat-pct">Percentage</label>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-bat-low">
-                                    <label for="set-bat-low">Low Warning</label>
-                                </div>
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-bat-crit">
-                                    <label for="set-bat-crit">Critical Warning</label>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-bat-fault">
-                                    <label for="set-bat-fault">Battery Fault</label>
-                                </div>
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-bat-charge">
-                                    <label for="set-bat-charge">Charging Status</label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="settings-section">
-                            <h4>Battery Thresholds</h4>
-                            <div class="form-row">
+                        <!-- PANEL 1: PROFILES & FLAGS -->
+                        <div class="settings-panel active" id="settings-panel-profiles">
+                            <div class="settings-section">
+                                <h4>Test Profile Selection</h4>
                                 <div class="form-group">
-                                    <label>Low Voltage (V)</label>
-                                    <input type="number" id="set-thresh-low-v" step="0.1" placeholder="10.8">
-                                </div>
-                                <div class="form-group">
-                                    <label>Critical Voltage (V)</label>
-                                    <input type="number" id="set-thresh-crit-v" step="0.1" placeholder="10.2">
+                                    <label>Current Test Profile</label>
+                                    <select id="set-test-profile">
+                                        <option value="0">CUSTOM</option>
+                                        <option value="1">MOTOR TEST</option>
+                                        <option value="2">ENCODER TEST</option>
+                                        <option value="3">MPU6050 TEST</option>
+                                        <option value="4">RFID TEST</option>
+                                        <option value="5">TOF TEST</option>
+                                        <option value="6">BATTERY TEST</option>
+                                        <option value="7">TEACH TEST</option>
+                                        <option value="8">REPEAT TEST</option>
+                                        <option value="9">FULL SYSTEM</option>
+                                    </select>
                                 </div>
                             </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label>Low Battery (%)</label>
-                                    <input type="number" id="set-thresh-low-pct" placeholder="20">
+
+                            <div class="settings-section" id="sec-dashboard-features">
+                                <h4>Dashboard Features</h4>
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-feat-dashboard">
+                                        <label for="set-feat-dashboard">Dashboard</label>
+                                    </div>
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-feat-teach">
+                                        <label for="set-feat-teach">Teach Mode</label>
+                                    </div>
                                 </div>
-                                <div class="form-group">
-                                    <label>Critical Battery (%)</label>
-                                    <input type="number" id="set-thresh-crit-pct" placeholder="10">
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-feat-repeat">
+                                        <label for="set-feat-repeat">Repeat Mode</label>
+                                    </div>
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-feat-manual">
+                                        <label for="set-feat-manual">Manual Control</label>
+                                    </div>
                                 </div>
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-feat-routes">
+                                        <label for="set-feat-routes">Route Manager</label>
+                                    </div>
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-feat-rfid">
+                                        <label for="set-feat-rfid">RFID Manager</label>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-feat-errors">
+                                        <label for="set-feat-errors">Error Log</label>
+                                    </div>
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-feat-system">
+                                        <label for="set-feat-system">System Information</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="settings-section" id="sec-communication">
+                                <h4>Communication</h4>
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-comm-uart">
+                                        <label for="set-comm-uart">STM32 UART</label>
+                                    </div>
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-comm-ws">
+                                        <label for="set-comm-ws">WebSocket</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="settings-section" id="sec-motion">
+                                <h4>Motion</h4>
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-mot-control">
+                                        <label for="set-mot-control">Motor Control</label>
+                                    </div>
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-mot-encoder">
+                                        <label for="set-mot-encoder">Encoder</label>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-mot-mpu">
+                                        <label for="set-mot-mpu">MPU6050</label>
+                                    </div>
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-mot-pid">
+                                        <label for="set-mot-pid">PID / Motion Control</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="settings-section" id="sec-rfid">
+                                <h4>RFID</h4>
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-rfid-reader">
+                                        <label for="set-rfid-reader">RFID Reader</label>
+                                    </div>
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-rfid-mgr">
+                                        <label for="set-rfid-mgr">RFID Manager</label>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-rfid-cps">
+                                        <label for="set-rfid-cps">RFID Checkpoints</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="settings-section" id="sec-obstacle">
+                                <h4>Obstacle</h4>
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-tof-sensors">
+                                        <label for="set-tof-sensors">ToF Sensors</label>
+                                    </div>
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-tof-obstacle">
+                                        <label for="set-tof-obstacle">Obstacle Detection</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="button-row" style="margin-top: 20px;">
+                                <button class="btn btn-primary" id="btn-settings-save">SAVE PROFILES & FLAGS</button>
                             </div>
                         </div>
 
-                        <div class="settings-section">
-                            <h4>System AP Configuration</h4>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label>AP Access SSID</label>
-                                    <input type="text" id="set-wifi-ssid" value="TARSLIFT_AGV">
+                        <!-- PANEL 2: BATTERY SETTINGS -->
+                        <div class="settings-panel" id="settings-panel-battery">
+                            <div class="settings-section" id="sec-battery">
+                                <h4>Battery</h4>
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-bat-mon">
+                                        <label for="set-bat-mon">Battery Monitoring</label>
+                                    </div>
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-bat-ina">
+                                        <label for="set-bat-ina">INA219</label>
+                                    </div>
                                 </div>
-                                <div class="form-group">
-                                    <label>AP Password (Min 8 Characters)</label>
-                                    <input type="password" id="set-wifi-pass" value="12345678">
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-bat-volt">
+                                        <label for="set-bat-volt">Voltage</label>
+                                    </div>
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-bat-curr">
+                                        <label for="set-bat-curr">Current</label>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-bat-power">
+                                        <label for="set-bat-power">Power</label>
+                                    </div>
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-bat-pct">
+                                        <label for="set-bat-pct">Percentage</label>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-bat-low">
+                                        <label for="set-bat-low">Low Warning</label>
+                                    </div>
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-bat-crit">
+                                        <label for="set-bat-crit">Critical Warning</label>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-bat-fault">
+                                        <label for="set-bat-fault">Battery Fault</label>
+                                    </div>
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-bat-charge">
+                                        <label for="set-bat-charge">Charging Status</label>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="form-row" style="margin-top: 15px;">
-                                <div class="form-group checkbox-group">
-                                    <input type="checkbox" id="set-sys-demo">
-                                    <label for="set-sys-demo">Enable Simulation Mode (DEMO_MODE)</label>
+
+                            <div class="settings-section">
+                                <h4>Battery Thresholds</h4>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>Low Voltage (V)</label>
+                                        <input type="number" id="set-thresh-low-v" step="0.1" placeholder="10.8">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Critical Voltage (V)</label>
+                                        <input type="number" id="set-thresh-crit-v" step="0.1" placeholder="10.2">
+                                    </div>
                                 </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>Low Battery (%)</label>
+                                        <input type="number" id="set-thresh-low-pct" placeholder="20">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Critical Battery (%)</label>
+                                        <input type="number" id="set-thresh-crit-pct" placeholder="10">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="button-row" style="margin-top: 20px;">
+                                <button class="btn btn-primary" id="btn-settings-save-battery">SAVE BATTERY CONFIGURATION</button>
                             </div>
                         </div>
 
-                        <div class="button-row">
-                            <button class="btn btn-primary" id="btn-settings-save">SAVE SETTINGS</button>
-                            <button class="btn btn-secondary" id="btn-settings-save-battery">SAVE BATTERY SETTINGS</button>
-                            <button class="btn btn-outline" id="btn-settings-reset">RESET DEFAULTS</button>
+                        <!-- PANEL 3: SYSTEM & ACCESS POINT -->
+                        <div class="settings-panel" id="settings-panel-system-ap">
+                            <div class="settings-section">
+                                <h4>Wi-Fi Network Scanner & LAN Setup</h4>
+                                <div class="form-row">
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Available Nearby Wi-Fi Networks</label>
+                                        <div style="display: flex; gap: 8px;">
+                                            <select id="wifi-scan-select" class="form-control" style="flex: 1; padding: 8px; border-radius: 6px; background: var(--bg-card); color: var(--text-color); border: 1px solid var(--border-color);">
+                                                <option value="">-- Click Scan Networks --</option>
+                                            </select>
+                                            <button class="btn btn-secondary" id="btn-wifi-scan">🔍 SCAN</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-row" style="margin-top: 12px;">
+                                    <div class="form-group">
+                                        <label>LAN Router SSID</label>
+                                        <input type="text" id="set-lan-ssid" value="Error - 404">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>LAN Router Password</label>
+                                        <input type="password" id="set-lan-pass" value="AsdfZxcv">
+                                    </div>
+                                </div>
+                                <div class="button-row" style="margin-top: 15px;">
+                                    <button class="btn btn-primary" id="btn-lan-save">CONNECT TO LAN ROUTER</button>
+                                </div>
+                            </div>
+
+                            <div class="settings-section">
+                                <h4>System AP Configuration</h4>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>AP Access SSID</label>
+                                        <input type="text" id="set-wifi-ssid" value="TARSLIFT_AGV">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>AP Password (Min 8 Characters)</label>
+                                        <input type="password" id="set-wifi-pass" value="12345678">
+                                    </div>
+                                </div>
+                                <div class="form-row" style="margin-top: 15px;">
+                                    <div class="form-group checkbox-group">
+                                        <input type="checkbox" id="set-sys-demo">
+                                        <label for="set-sys-demo">Enable Simulation Mode (DEMO_MODE)</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="settings-section">
+                                <h4>Administrative Controls</h4>
+                                <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 15px; line-height: 1.5;">
+                                    Use these tools to factory reset the AGV system parameters or permanently erase routes and log files from flash. Wiping data requires password verification.
+                                </p>
+                                <div class="button-row" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                                    <button class="btn btn-outline" id="btn-settings-reset">RESET CONFIG DEFAULTS</button>
+                                    <button class="btn btn-danger" id="btn-system-wipe" style="background-color: var(--color-red); color: white; border: none; font-weight: 600;">🔴 WIPE ALL SYSTEM DATA</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </section>

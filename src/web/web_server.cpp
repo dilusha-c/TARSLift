@@ -143,7 +143,7 @@ void webServerInit() {
         doc["fs_used"] = fsUsed;
 
         SystemHealth health = getSystemHealth();
-        JsonObject healthObj = doc.createNestedObject("health");
+        JsonObject healthObj = doc["health"].to<JsonObject>();
         healthObj["esp32"] = (int)health.esp32;
         healthObj["stm32"] = (int)health.stm32;
         healthObj["motor"] = (int)health.motor;
@@ -154,7 +154,54 @@ void webServerInit() {
         healthObj["battery"] = (int)health.battery;
         healthObj["uart"] = (int)health.uart;
 
+        // Dual IP reporting
+        doc["ap_ip"] = WiFi.softAPIP().toString();
+        doc["sta_ip"] = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "Disconnected";
+        doc["sta_connected"] = (WiFi.status() == WL_CONNECTED);
+        doc["sta_ssid"] = sysSettings.wifi_ssid;
+
         sendJsonResponse(request, doc);
+    });
+
+    // GET /api/wifi/scan
+    server.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
+        int n = WiFi.scanNetworks();
+        JsonDocument doc;
+        JsonArray networks = doc.to<JsonArray>();
+
+        for (int i = 0; i < n; ++i) {
+            JsonObject net = networks.add<JsonObject>();
+            net["ssid"] = WiFi.SSID(i);
+            net["rssi"] = WiFi.RSSI(i);
+            net["secure"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+        }
+        WiFi.scanDelete();
+        sendJsonResponse(request, doc);
+    });
+
+    // POST /api/wifi/connect
+    server.on("/api/wifi/connect", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, data, len);
+        if (err) {
+            sendErrorResponse(request, "Invalid JSON payload");
+            return;
+        }
+
+        String ssid = doc["ssid"] | "";
+        String pass = doc["password"] | "";
+
+        if (ssid.length() == 0) {
+            sendErrorResponse(request, "SSID cannot be empty");
+            return;
+        }
+
+        strncpy(sysSettings.wifi_ssid, ssid.c_str(), sizeof(sysSettings.wifi_ssid));
+        strncpy(sysSettings.wifi_password, pass.c_str(), sizeof(sysSettings.wifi_password));
+        saveSettings();
+
+        WiFi.begin(sysSettings.wifi_ssid, sysSettings.wifi_password);
+        sendSuccessResponse(request, "Connecting to LAN Wi-Fi " + ssid);
     });
 
     // POST /api/teach/start
@@ -326,7 +373,7 @@ void webServerInit() {
 
     // POST /api/rfid/scan
     server.on("/api/rfid/scan", HTTP_POST, [](AsyncWebServerRequest *request) {
-        triggerRFIDScanSimulation();
+        startRFIDScan();
         sendSuccessResponse(request, "RFID scan simulated");
     });
 
@@ -362,7 +409,7 @@ void webServerInit() {
         doc["enable_repeat_mode"] = sysSettings.enable_repeat_mode;
         doc["enable_manual_control"] = sysSettings.enable_manual_control;
         doc["enable_route_manager"] = sysSettings.enable_route_manager;
-        doc["enable_rfid_manager"] = sysSettings.enable_rfid_manager_flag;
+        doc["enable_rfid_manager"] = sysSettings.enable_rfid_manager;
         doc["enable_error_log"] = sysSettings.enable_error_log;
         doc["enable_system_info"] = sysSettings.enable_system_info;
 
@@ -431,7 +478,7 @@ void webServerInit() {
             if (doc.containsKey("enable_repeat_mode")) sysSettings.enable_repeat_mode = doc["enable_repeat_mode"];
             if (doc.containsKey("enable_manual_control")) sysSettings.enable_manual_control = doc["enable_manual_control"];
             if (doc.containsKey("enable_route_manager")) sysSettings.enable_route_manager = doc["enable_route_manager"];
-            if (doc.containsKey("enable_rfid_manager")) sysSettings.enable_rfid_manager_flag = doc["enable_rfid_manager"];
+            if (doc.containsKey("enable_rfid_manager")) sysSettings.enable_rfid_manager = doc["enable_rfid_manager"];
             if (doc.containsKey("enable_error_log")) sysSettings.enable_error_log = doc["enable_error_log"];
             if (doc.containsKey("enable_system_info")) sysSettings.enable_system_info = doc["enable_system_info"];
 
@@ -509,6 +556,68 @@ void webServerInit() {
 
         handleSerialCommand(command);
         sendSuccessResponse(request, "Command received");
+    });
+
+    // POST /api/system/wipe
+    server.on("/api/system/wipe", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, data, len);
+        if (err) {
+            sendErrorResponse(request, "Invalid JSON payload");
+            return;
+        }
+
+        String password = doc["password"] | "";
+        if (password != "1234") {
+            sendErrorResponse(request, "Unauthorized: Invalid administrative password", 401);
+            return;
+        }
+
+        // Wipe routes
+        {
+            File dir = LittleFS.open("/routes");
+            if (dir && dir.isDirectory()) {
+                File file = dir.openNextFile();
+                while (file) {
+                    String path = String("/routes/") + file.name();
+                    file.close();
+                    LittleFS.remove(path);
+                    file = dir.openNextFile();
+                }
+            }
+        }
+
+        // Wipe logs
+        {
+            File dir = LittleFS.open("/logs");
+            if (dir && dir.isDirectory()) {
+                File file = dir.openNextFile();
+                while (file) {
+                    String path = String("/logs/") + file.name();
+                    file.close();
+                    LittleFS.remove(path);
+                    file = dir.openNextFile();
+                }
+            }
+        }
+
+        // Wipe RFID database
+        if (LittleFS.exists("/rfid/tags.json")) {
+            LittleFS.remove("/rfid/tags.json");
+        }
+
+        // Wipe config settings
+        if (LittleFS.exists("/config/settings.json")) {
+            LittleFS.remove("/config/settings.json");
+        }
+
+        sendSuccessResponse(request, "System data wiped successfully. Rebooting...");
+
+        // Restart ESP32 after delay
+        request->onDisconnect([]() {
+            delay(1000);
+            ESP.restart();
+        });
     });
 
     // ------------------------------------------------------------------------
