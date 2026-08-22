@@ -6,6 +6,7 @@
     <title>TARSLIFT AGV Dashboard</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="css/responsive.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <!-- App Layout Container -->
@@ -39,6 +40,10 @@
                 <button class="nav-item" data-view="rfid">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
                     <span>RFID Manager</span>
+                </button>
+                <button class="nav-item" data-view="pid_tune">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3M1 14h6m2-6h6m2 8h6"/></svg>
+                    <span>System Config</span>
                 </button>
                 <button class="nav-item" data-view="errors">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -371,19 +376,38 @@
                         <h3>REPEAT MISSION PLAYER</h3>
                         
                         <div class="route-selection-bar">
-                            <label>Select Route:</label>
-                            <select id="repeat-route-selector">
-                                <option value="">-- Choose Taught Route --</option>
+                            <label>Nav Mode:</label>
+                            <select id="repeat-nav-mode-selector" style="margin-right: 15px; padding: 8px;">
+                                <option value="0">Direct Route (Follow Specific Route)</option>
+                                <option value="1">Shortest Path (Auto-Route between RFIDs)</option>
                             </select>
-                            <button class="btn btn-primary" id="btn-repeat-start">START MISSION</button>
+
+                            <div id="repeat-direct-mode-inputs" style="display: inline-block;">
+                                <label>Select Route:</label>
+                                <select id="repeat-route-selector">
+                                    <option value="">-- Choose Taught Route --</option>
+                                </select>
+                            </div>
+
+                            <div id="repeat-shortest-mode-inputs" style="display: none;">
+                                <label>Start RFID:</label>
+                                <input type="text" id="repeat-start-rfid" placeholder="e.g. START" style="width: 120px;">
+                                <label style="margin-left: 10px;">Dest RFID:</label>
+                                <input type="text" id="repeat-dest-rfid" placeholder="e.g. LAB" style="width: 120px;">
+                            </div>
+
+                            <button class="btn btn-primary" id="btn-repeat-start" style="margin-left: 15px;">START MISSION</button>
                             <button class="btn btn-secondary" id="btn-repeat-pause" disabled>PAUSE</button>
                             <button class="btn btn-primary" id="btn-repeat-resume" style="display:none;">RESUME</button>
                             <button class="btn btn-danger" id="btn-repeat-stop" disabled>STOP</button>
                         </div>
 
-                        <!-- Flowchart diagram of checkpoints -->
-                        <div class="route-flowchart" id="route-flowchart-container">
-                            <p class="placeholder-text">Please select and start a route to display mission map progression.</p>
+                        <!-- Map Canvas -->
+                        <div class="map-canvas-wrapper" style="margin: 20px 0; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; background: #000; position: relative;">
+                            <div style="position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.7); color: #fff; padding: 5px 10px; border-radius: 4px; font-size: 12px; font-family: monospace;">
+                                <span id="repeat-map-coord-badge">X: 0.00m | Y: 0.00m</span>
+                            </div>
+                            <canvas id="repeatMapCanvas" width="800" height="400" style="width: 100%; display: block;"></canvas>
                         </div>
 
                         <div class="repeat-grid-info">
@@ -549,7 +573,328 @@
                     </div>
                 </section>
 
-                <!-- 6. ERROR LOG VIEW -->
+                <!-- 6. SYSTEM CONFIG VIEW -->
+                <section class="view" id="view-pid_tune">
+                    <div class="settings-layout card">
+                        <h2>System Configuration</h2>
+                        
+                        <div class="tabs-header" style="margin-bottom: 20px; border-bottom: 1px solid var(--border-color); display: flex; gap: 15px;">
+                            <button class="config-tab-btn active" data-target="config-motors" style="background: none; border: none; color: var(--text-main); font-size: 16px; padding: 10px 5px; cursor: pointer; border-bottom: 2px solid var(--color-blue);">Motors & Encoders</button>
+                            <button class="config-tab-btn" data-target="config-ppr" style="background: none; border: none; color: var(--text-muted); font-size: 16px; padding: 10px 5px; cursor: pointer; border-bottom: 2px solid transparent;">Encoder Calib.</button>
+                            <button class="config-tab-btn" data-target="config-tof" style="background: none; border: none; color: var(--text-muted); font-size: 16px; padding: 10px 5px; cursor: pointer; border-bottom: 2px solid transparent;">ToF Sensors</button>
+                            <button class="config-tab-btn" data-target="config-imu" style="background: none; border: none; color: var(--text-muted); font-size: 16px; padding: 10px 5px; cursor: pointer; border-bottom: 2px solid transparent;">MPU6050 IMU</button>
+                            <button class="config-tab-btn" data-target="config-rfid" style="background: none; border: none; color: var(--text-muted); font-size: 16px; padding: 10px 5px; cursor: pointer; border-bottom: 2px solid transparent;">RFID Reader</button>
+                            <button class="config-tab-btn" data-target="config-nav" style="background: none; border: none; color: var(--text-muted); font-size: 16px; padding: 10px 5px; cursor: pointer; border-bottom: 2px solid transparent;">Navigation & Routing</button>
+                        </div>
+
+                        <!-- NAVIGATION & ROUTING TAB -->
+                        <div class="config-tab-content" id="config-nav" style="display: none;">
+                            <div class="card" style="margin-bottom: 20px;">
+                                <div class="card-header">
+                                    <h3>Navigation Engine Settings</h3>
+                                </div>
+                                <div class="card-body">
+                                    <p class="text-muted" style="margin-bottom: 15px;">Configure how the AGV calculates routes and drives along trajectories.</p>
+                                    
+                                    <div class="form-row">
+                                        <div class="form-group" style="flex: 1;">
+                                            <label for="set-drive-method">Driving Method</label>
+                                            <select id="set-drive-method">
+                                                <option value="0">Point-to-Point Waypoint (Stop & Turn)</option>
+                                                <option value="1">Pure Pursuit (Continuous Smooth Curves)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-row" style="margin-top: 20px;">
+                                        <div class="form-group" style="flex: 1;">
+                                            <label for="set-lookahead">Pure Pursuit Lookahead Distance (mm)</label>
+                                            <input type="number" id="set-lookahead" value="300" min="50" max="1000" step="10">
+                                            <span class="input-hint">Higher values make curves smoother but corner cutting worse.</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="button-row" style="margin-top: 20px;">
+                                        <button class="btn btn-primary" id="btn-nav-save">SAVE NAVIGATION SETTINGS</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- MOTORS & ENCODERS TAB -->
+                        <div class="config-tab-content" id="config-motors" style="display: block;">
+                            <div class="card" style="margin-bottom: 20px;">
+                            <div class="card-header">
+                                <h3>Live Encoder Speeds</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-row">
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Left Motor RPM</label>
+                                        <span id="live-enc-l-rpm" class="value-display" style="font-size: 24px; color: var(--primary-color);">0</span>
+                                    </div>
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Right Motor RPM</label>
+                                        <span id="live-enc-r-rpm" class="value-display" style="font-size: 24px; color: var(--primary-color);">0</span>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Left Speed (mm/s)</label>
+                                        <span id="live-enc-l-mms" class="value-display" style="font-size: 24px; color: var(--accent-color);">0</span>
+                                    </div>
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Right Speed (mm/s)</label>
+                                        <span id="live-enc-r-mms" class="value-display" style="font-size: 24px; color: var(--accent-color);">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card" style="margin-bottom: 20px;">
+                            <div class="card-header">
+                                <h3>Encoder Calibration</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-row">
+                                    <div class="form-group" style="flex: 1;">
+                                        <label for="set-enc-ppr-l">Left Pulses Per Revolution (PPR)</label>
+                                        <input type="number" id="set-enc-ppr-l" value="287" min="1" max="10000">
+                                    </div>
+                                    <div class="form-group" style="flex: 1;">
+                                        <label for="set-enc-ppr-r">Right Pulses Per Revolution (PPR)</label>
+                                        <input type="number" id="set-enc-ppr-r" value="287" min="1" max="10000">
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group" style="flex: 1;">
+                                        <label for="set-wheel-circ">Wheel Circumference (mm)</label>
+                                        <input type="number" id="set-wheel-circ" value="138.2" step="0.1" min="10">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card" style="margin-bottom: 20px;">
+                            <div class="card-header">
+                                <h3>Motor PID Tuning</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-row" style="gap: 20px;">
+                                    <!-- Left Motor PID -->
+                                    <div style="flex: 1; min-width: 300px;">
+                                        <h4 style="margin-bottom: 15px; color: var(--text-main); border-bottom: 1px solid var(--border-color); padding-bottom: 5px;">Left Motor</h4>
+                                        <div class="form-row">
+                                            <div class="form-group" style="flex: 1;">
+                                                <label>Kp</label>
+                                                <input type="number" id="set-pid-kp-l" step="0.1" min="0" max="1000" value="1.0">
+                                            </div>
+                                            <div class="form-group" style="flex: 1;">
+                                                <label>Ki</label>
+                                                <input type="number" id="set-pid-ki-l" step="0.1" min="0" max="500" value="0.0">
+                                            </div>
+                                            <div class="form-group" style="flex: 1;">
+                                                <label>Kd</label>
+                                                <input type="number" id="set-pid-kd-l" step="0.1" min="0" max="500" value="0.0">
+                                            </div>
+                                        </div>
+                                        <div style="position: relative; height: 250px; width: 100%;">
+                                            <canvas id="chart-motor-pid-l"></canvas>
+                                        </div>
+                                    </div>
+
+                                    <!-- Right Motor PID -->
+                                    <div style="flex: 1; min-width: 300px;">
+                                        <h4 style="margin-bottom: 15px; color: var(--text-main); border-bottom: 1px solid var(--border-color); padding-bottom: 5px;">Right Motor</h4>
+                                        <div class="form-row">
+                                            <div class="form-group" style="flex: 1;">
+                                                <label>Kp</label>
+                                                <input type="number" id="set-pid-kp-r" step="0.1" min="0" max="1000" value="1.0">
+                                            </div>
+                                            <div class="form-group" style="flex: 1;">
+                                                <label>Ki</label>
+                                                <input type="number" id="set-pid-ki-r" step="0.1" min="0" max="500" value="0.0">
+                                            </div>
+                                            <div class="form-group" style="flex: 1;">
+                                                <label>Kd</label>
+                                                <input type="number" id="set-pid-kd-r" step="0.1" min="0" max="500" value="0.0">
+                                            </div>
+                                        </div>
+                                        <div style="position: relative; height: 250px; width: 100%;">
+                                            <canvas id="chart-motor-pid-r"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="button-row" style="margin-top: 20px;">
+                                    <button class="btn btn-secondary" id="btn-pid-apply-live" style="flex: 1;">APPLY LIVE PID TO BOTH</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card" style="margin-bottom: 20px;">
+                            <div class="card-header">
+                                <h3>Motor Trims (Hardware Sync)</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted" style="margin-bottom: 15px;">Adjust these sliders to slow down a faster motor until it matches the physical speed of the slower motor.</p>
+                                
+                                <div class="form-row">
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Left Motor Forward (<span id="lbl-trim-l-fwd">100</span>%)</label>
+                                        <input type="range" id="set-trim-l-fwd" min="0" max="200" value="100">
+                                    </div>
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Right Motor Forward (<span id="lbl-trim-r-fwd">100</span>%)</label>
+                                        <input type="range" id="set-trim-r-fwd" min="0" max="200" value="100">
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Left Motor Turn (<span id="lbl-trim-l-turn">100</span>%)</label>
+                                        <input type="range" id="set-trim-l-turn" min="0" max="200" value="100">
+                                    </div>
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Right Motor Turn (<span id="lbl-trim-r-turn">100</span>%)</label>
+                                        <input type="range" id="set-trim-r-turn" min="0" max="200" value="100">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="button-row" style="margin-top: 20px;">
+                            <button class="btn btn-primary" id="btn-pid-save">SAVE MOTORS & ENCODERS SETTINGS</button>
+                        </div>
+                        </div> <!-- End motors tab -->
+                        
+                        <!-- PPR CALIBRATION TAB -->
+                        <div class="config-tab-content" id="config-ppr" style="display: none;">
+                            <div class="card" style="margin-bottom: 20px;">
+                                <div class="card-header">
+                                    <h3>Encoder PPR Calibration Tool</h3>
+                                </div>
+                                <div class="card-body">
+                                    <p class="text-muted" style="margin-bottom: 15px;">Manually rotate the wheel for a custom number of full circles. The system will measure the raw pulses and calculate the exact Pulses Per Revolution (PPR).</p>
+                                    
+                                    <div class="form-row">
+                                        <div class="form-group" style="flex: 1;">
+                                            <label for="calib-ppr-side">Select Wheel to Calibrate</label>
+                                            <select id="calib-ppr-side">
+                                                <option value="left">Left Wheel</option>
+                                                <option value="right">Right Wheel</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-row" style="margin-top: 20px;">
+                                        <div class="form-group" style="flex: 1;">
+                                            <label>Live Raw Pulses</label>
+                                            <span id="sys-raw-enc-live" class="value-display" style="font-size: 24px; color: var(--primary-color);">0</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="form-row" style="margin-top: 20px;">
+                                        <div class="form-group" style="flex: 1;">
+                                            <label for="calib-ppr-cycles">Number of Full Rotations</label>
+                                            <input type="number" id="calib-ppr-cycles" value="10" min="1" max="100">
+                                        </div>
+                                        <div class="form-group" style="flex: 1;">
+                                            <label>Calculated PPR</label>
+                                            <span id="sys-calib-ppr-result" class="value-display" style="font-size: 24px; color: var(--color-green);">---</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="button-row" style="margin-top: 20px;">
+                                        <button class="btn btn-secondary" id="btn-ppr-start" style="flex: 1;">START MEASUREMENT</button>
+                                        <button class="btn btn-danger" id="btn-ppr-stop" style="flex: 1; display: none;">STOP & CALCULATE</button>
+                                        <button class="btn btn-primary" id="btn-ppr-apply" style="flex: 1; display: none;">APPLY & SAVE SETTINGS</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div> <!-- End PPR tab -->
+                        
+                        <!-- TOF TAB -->
+                        <div class="config-tab-content" id="config-tof" style="display: none;">
+                        <div class="card" style="margin-bottom: 20px;">
+                            <div class="card-header">
+                                <h3>ToF Sensor Configuration</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-row">
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Live Distance (Left)</label>
+                                        <span id="sys-tof-l" class="value-display" style="font-size: 24px; color: var(--primary-color);">0 mm</span>
+                                    </div>
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Live Distance (Centre)</label>
+                                        <span id="sys-tof-c" class="value-display" style="font-size: 24px; color: var(--primary-color);">0 mm</span>
+                                    </div>
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Live Distance (Right)</label>
+                                        <span id="sys-tof-r" class="value-display" style="font-size: 24px; color: var(--primary-color);">0 mm</span>
+                                    </div>
+                                </div>
+                                <div class="form-row" style="margin-top: 20px;">
+                                    <div class="form-group" style="flex: 1;">
+                                        <label for="set-tof-stop-dist">Stop Detection Distance (mm)</label>
+                                        <input type="number" id="set-tof-stop-dist" value="150" min="50" max="2000">
+                                    </div>
+                                    <div class="form-group" style="display: flex; align-items: flex-end;">
+                                        <button class="btn btn-primary" id="btn-tof-save">SAVE TOF CONFIG</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        </div> <!-- End tof tab -->
+
+                        <!-- IMU TAB -->
+                        <div class="config-tab-content" id="config-imu" style="display: none;">
+                        <div class="card" style="margin-bottom: 20px;">
+                            <div class="card-header">
+                                <h3>MPU6050 IMU Configuration</h3>
+                            </div>
+                            <div class="card-body" style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <p class="text-muted" style="margin-bottom: 15px;">Verify the IMU heading and calibrate the gyroscope offset if the AGV drifts while standing still.</p>
+                                    <div class="form-group">
+                                        <label>Current Heading</label>
+                                        <span id="sys-imu-heading" class="value-display" style="font-size: 32px; color: var(--primary-color);">0.0°</span>
+                                    </div>
+                                    <button class="btn btn-primary" id="btn-imu-calibrate" style="margin-top: 20px;">CALIBRATE IMU NOW</button>
+                                </div>
+                                <div class="compass-container">
+                                    <div class="compass-ring"></div>
+                                    <div class="compass-needle" id="compass-needle"></div>
+                                </div>
+                            </div>
+                        </div>
+                        </div> <!-- End IMU tab -->
+
+                        <!-- RFID TAB -->
+                        <div class="config-tab-content" id="config-rfid" style="display: none;">
+                        <div class="card" style="margin-bottom: 20px;">
+                            <div class="card-header">
+                                <h3>RFID Reader Viewer</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted" style="margin-bottom: 15px;">Place an RFID tag on the reader to verify it's working properly.</p>
+                                <div class="form-row">
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Last Scanned UID</label>
+                                        <span id="sys-rfid-uid" class="value-display" style="font-size: 24px; color: var(--accent-color);">NONE</span>
+                                    </div>
+                                    <div class="form-group" style="flex: 1;">
+                                        <label>Registered Tag Name</label>
+                                        <span id="sys-rfid-name" class="value-display" style="font-size: 24px; color: var(--text-color);">Unknown</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        </div> <!-- End RFID tab -->
+
+                    </div>
+                </section>
+
+                <!-- 7. ERROR LOG VIEW -->
                 <section class="view" id="view-errors">
                     <div class="errors-layout card">
                         <div class="table-header-row">
@@ -792,6 +1137,7 @@
                                     </div>
                                 </div>
                             </div>
+
 
                             <div class="settings-section" id="sec-rfid">
                                 <h4>RFID</h4>

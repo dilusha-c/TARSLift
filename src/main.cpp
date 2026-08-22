@@ -51,6 +51,9 @@ void webTask(void *pvParameters) {
         }
 
 
+        // Cleanup dead/stale WebSocket clients
+        cleanupWebSocketClients();
+
         vTaskDelay(pdMS_TO_TICKS(10)); // Yield to Wi-Fi stack
     }
 }
@@ -158,6 +161,17 @@ void setup() {
 
     // Initialize STM32 UART Link
     stm32UartInit();
+
+    // Push initial motor trim settings to STM32
+    if (sysSettings.enable_stm32_uart && !sysSettings.demo_mode) {
+        delay(10); // Give STM32 a tiny moment to wake its UART
+        sendStm32MotorTrim(
+            sysSettings.motor_l_fwd_scale,
+            sysSettings.motor_r_fwd_scale,
+            sysSettings.motor_l_turn_scale,
+            sysSettings.motor_r_turn_scale
+        );
+    }
 
     // Initialize Managers
     rfidManagerInit();

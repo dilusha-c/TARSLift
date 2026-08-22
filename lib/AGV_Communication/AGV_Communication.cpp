@@ -243,6 +243,28 @@ bool AGV_Communication::stop(
 }
 
 
+bool AGV_Communication::setSpeeds(
+    int16_t leftSpeedMmS,
+    int16_t rightSpeedMmS,
+    AGVPacket& packet
+)
+{
+    uint8_t payload[4];
+
+    payload[0] = static_cast<uint8_t>(leftSpeedMmS & 0xFF);
+    payload[1] = static_cast<uint8_t>((leftSpeedMmS >> 8) & 0xFF);
+    payload[2] = static_cast<uint8_t>(rightSpeedMmS & 0xFF);
+    payload[3] = static_cast<uint8_t>((rightSpeedMmS >> 8) & 0xFF);
+
+    return makeCommand(
+        AGVCommand::SET_SPEEDS,
+        payload,
+        4,
+        packet
+    );
+}
+
+
 bool AGV_Communication::setRepeatSpeed(
     uint16_t speedPercent,
     AGVPacket& packet
@@ -270,6 +292,40 @@ bool AGV_Communication::setRepeatSpeed(
 // =====================================================
 // V4
 // =====================================================
+
+bool AGV_Communication::setMotorTrim(uint8_t lFwd, uint8_t rFwd, uint8_t lTurn, uint8_t rTurn, AGVPacket& packet) {
+    uint8_t payload[4] = { lFwd, rFwd, lTurn, rTurn };
+    return makeCommand(AGVCommand::SET_MOTOR_TRIM, payload, 4, packet);
+}
+
+bool AGV_Communication::setPidTuning(float kpL, float kiL, float kdL, float kpR, float kiR, float kdR, AGVPacket& packet) {
+    uint8_t payload[24];
+    memcpy(&payload[0], &kpL, 4);
+    memcpy(&payload[4], &kiL, 4);
+    memcpy(&payload[8], &kdL, 4);
+    memcpy(&payload[12], &kpR, 4);
+    memcpy(&payload[16], &kiR, 4);
+    memcpy(&payload[20], &kdR, 4);
+    return makeCommand(AGVCommand::SET_PID_TUNING, payload, 24, packet);
+}
+
+bool AGV_Communication::setEncoderConfig(float wheelCircMm, uint16_t pprL, uint16_t pprR, AGVPacket& packet) {
+    uint8_t payload[8];
+    memcpy(&payload[0], &wheelCircMm, 4);
+    payload[4] = static_cast<uint8_t>(pprL & 0xFF); payload[5] = static_cast<uint8_t>((pprL >> 8) & 0xFF);
+    payload[6] = static_cast<uint8_t>(pprR & 0xFF); payload[7] = static_cast<uint8_t>((pprR >> 8) & 0xFF);
+    return makeCommand(AGVCommand::SET_ENCODER_CONFIG, payload, 8, packet);
+}
+
+bool AGV_Communication::calibrateImu(AGVPacket& packet) {
+    return makeEmptyCommand(AGVCommand::CALIBRATE_IMU, packet);
+}
+
+bool AGV_Communication::setTofConfig(float stopDistanceMm, AGVPacket& packet) {
+    uint8_t payload[4];
+    memcpy(&payload[0], &stopDistanceMm, 4);
+    return makeCommand(AGVCommand::SET_TOF_CONFIG, payload, 4, packet);
+}
 
 bool AGV_Communication::teachStart(
     AGVPacket& packet
@@ -493,6 +549,17 @@ bool AGV_Communication::makeIMUData(int16_t ax, int16_t ay, int16_t az, int16_t 
     return makeCommand(AGVCommand::IMU_DATA, payload, 14, packet);
 }
 
+bool AGV_Communication::makeTofData(uint16_t leftMm, uint16_t centerMm, uint16_t rightMm, AGVPacket& packet) {
+    uint8_t payload[6];
+    payload[0] = static_cast<uint8_t>(leftMm & 0xFF);
+    payload[1] = static_cast<uint8_t>((leftMm >> 8) & 0xFF);
+    payload[2] = static_cast<uint8_t>(centerMm & 0xFF);
+    payload[3] = static_cast<uint8_t>((centerMm >> 8) & 0xFF);
+    payload[4] = static_cast<uint8_t>(rightMm & 0xFF);
+    payload[5] = static_cast<uint8_t>((rightMm >> 8) & 0xFF);
+    return makeCommand(AGVCommand::TOF_DATA, payload, 6, packet);
+}
+
 bool AGV_Communication::makeMotorStatus(int16_t leftPwm, int16_t rightPwm, int8_t leftDir, int8_t rightDir, AGVPacket& packet) {
     uint8_t payload[6];
     payload[0] = static_cast<uint8_t>(leftPwm & 0xFF);
@@ -556,6 +623,7 @@ bool AGV_Communication::parseMove(const AGVPacket& packet, int32_t& distanceMm, 
     if (packet.cmd != AGVCommand::MOVE && packet.cmd != AGVCommand::STEP_MOVE) return false;
     if (packet.length < 6) return false;
     distanceMm = static_cast<int32_t>(packet.payload[0] | (packet.payload[1] << 8) | (packet.payload[2] << 16) | (packet.payload[3] << 24));
+    speedMmS = static_cast<uint16_t>(packet.payload[0] | (packet.payload[1] << 8));
     speedMmS = static_cast<uint16_t>(packet.payload[4] | (packet.payload[5] << 8));
     return true;
 }
@@ -571,6 +639,13 @@ bool AGV_Communication::parseTurn(const AGVPacket& packet, int16_t& angleDegX10,
 bool AGV_Communication::parseSetRepeatSpeed(const AGVPacket& packet, uint16_t& speedPercent) {
     if (packet.cmd != AGVCommand::SET_REPEAT_SPEED || packet.length < 2) return false;
     speedPercent = static_cast<uint16_t>(packet.payload[0] | (packet.payload[1] << 8));
+    return true;
+}
+
+bool AGV_Communication::parseSetSpeeds(const AGVPacket& packet, int16_t& leftSpeedMmS, int16_t& rightSpeedMmS) {
+    if (packet.cmd != AGVCommand::SET_SPEEDS || packet.length < 4) return false;
+    leftSpeedMmS = static_cast<int16_t>(packet.payload[0] | (packet.payload[1] << 8));
+    rightSpeedMmS = static_cast<int16_t>(packet.payload[2] | (packet.payload[3] << 8));
     return true;
 }
 
@@ -607,5 +682,25 @@ bool AGV_Communication::parseStepTurn(const AGVPacket& packet, int16_t& angleDeg
 bool AGV_Communication::parseSegmentComplete(const AGVPacket& packet, uint16_t& segmentId) {
     if (packet.cmd != AGVCommand::SEGMENT_COMPLETE || packet.length < 2) return false;
     segmentId = static_cast<uint16_t>(packet.payload[0] | (packet.payload[1] << 8));
+    return true;
+}bool AGV_Communication::parseEncoderData(const AGVPacket& packet, int32_t& leftPulses, int32_t& rightPulses) {
+    if (packet.cmd != AGVCommand::ENCODER_DATA || packet.length < 8) return false;
+    leftPulses = static_cast<int32_t>(packet.payload[0] | (packet.payload[1] << 8) | (packet.payload[2] << 16) | (packet.payload[3] << 24));
+    rightPulses = static_cast<int32_t>(packet.payload[4] | (packet.payload[5] << 8) | (packet.payload[6] << 16) | (packet.payload[7] << 24));
+    return true;
+}
+
+bool AGV_Communication::parseTofData(const AGVPacket& packet, uint16_t& leftMm, uint16_t& centerMm, uint16_t& rightMm) {
+    if (packet.cmd != AGVCommand::TOF_DATA || packet.length < 6) return false;
+    leftMm = static_cast<uint16_t>(packet.payload[0] | (packet.payload[1] << 8));
+    centerMm = static_cast<uint16_t>(packet.payload[2] | (packet.payload[3] << 8));
+    rightMm = static_cast<uint16_t>(packet.payload[4] | (packet.payload[5] << 8));
+    return true;
+}
+
+bool AGV_Communication::parseMotorTrim(const AGVPacket& packet, uint8_t& lFwd, uint8_t& rFwd, uint8_t& lTurn, uint8_t& rTurn) {
+    if (packet.cmd != AGVCommand::SET_MOTOR_TRIM || packet.length < 4) return false;
+    lFwd = packet.payload[0]; rFwd = packet.payload[1];
+    lTurn = packet.payload[2]; rTurn = packet.payload[3];
     return true;
 }

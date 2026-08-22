@@ -7,5 +7,6 @@
 void webSocketInit(AsyncWebServer *server);
 void broadcastTelemetry();
 bool isWebSocketClientConnected();
+void cleanupWebSocketClients();
 
 #endif // WEBSOCKET_H

@@ -46,6 +46,7 @@ void addTrajectoryPoint(float x, float y, float heading, const String &rfidTag);
 
 // Repeat Mode Control
 bool startRepeating(const String &routeId);
+bool startRepeatingShortestPath(const String &startRfid, const String &destRfid);
 bool pauseRepeating();
 bool resumeRepeating();
 bool stopRepeating();

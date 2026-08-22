@@ -27,12 +27,17 @@ extern "C" {
 #define AGV_CMD_TURN              0x11
 #define AGV_CMD_STOP              0x12
 #define AGV_CMD_SET_REPEAT_SPEED  0x13
+#define AGV_CMD_SET_MOTOR_TRIM    0x14
+#define AGV_CMD_SET_PID_TUNING    0x15
+#define AGV_CMD_SET_ENCODER_CONFIG 0x16
 
 #define AGV_CMD_TEACH_START       0x20
 #define AGV_CMD_TEACH_STOP        0x21
 
 #define AGV_CMD_ODOMETRY          0x30
 #define AGV_CMD_IMU_DATA          0x31
+#define AGV_CMD_ENCODER_DATA      0x32
+#define AGV_CMD_TOF_DATA          0x33
 #define AGV_CMD_MOTOR_STATUS      0x60
 
 #define AGV_CMD_SEGMENT_START     0x50
@@ -59,17 +64,6 @@ extern "C" {
 #define AGV_STATE_BOOT            0x00
 #define AGV_STATE_READY           0x01
 #define AGV_STATE_ERROR           0x02
-
-/* Severity Levels */
-#define AGV_SEVERITY_INFO         0x01
-#define AGV_SEVERITY_WARNING      0x02
-#define AGV_SEVERITY_ERROR        0x03
-#define AGV_SEVERITY_CRITICAL     0x04
-
-/* Error Sources */
-#define AGV_SOURCE_SYSTEM         0x01
-#define AGV_SOURCE_UART           0x02
-#define AGV_SOURCE_PROTOCOL       0x03
 
 /* Packet Structure */
 typedef struct {
@@ -120,7 +114,9 @@ uint16_t agv_build_error(uint16_t error_code, uint8_t severity, uint8_t source, 
 
 /* STM32 Telemetry & Event Builders */
 uint16_t agv_build_odometry(int32_t left_mm, int32_t right_mm, int16_t yaw_deg_x10, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
+uint16_t agv_build_encoder_data(int32_t left_pulses, int32_t right_pulses, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
 uint16_t agv_build_imu_data(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16_t gz, int16_t yaw_deg_x10, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
+uint16_t agv_build_tof_data(uint16_t left_mm, uint16_t center_mm, uint16_t right_mm, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
 uint16_t agv_build_motor_status(int16_t left_pwm, int16_t right_pwm, int8_t left_dir, int8_t right_dir, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
 uint16_t agv_build_move_done(uint8_t orig_seq, uint8_t result, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
 uint16_t agv_build_turn_done(uint8_t orig_seq, uint8_t result, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
@@ -129,8 +125,12 @@ uint16_t agv_build_turn_done(uint8_t orig_seq, uint8_t result, uint8_t seq, uint
 bool agv_parse_move(const agv_packet_t *pkt, int32_t *distance_mm, uint16_t *speed_mm_s);
 bool agv_parse_turn(const agv_packet_t *pkt, int16_t *angle_deg_x10, uint16_t *speed_deg_s);
 bool agv_parse_set_repeat_speed(const agv_packet_t *pkt, uint16_t *speed_percent);
+bool agv_parse_motor_trim(const agv_packet_t *pkt, uint8_t *lFwd, uint8_t *rFwd, uint8_t *lTurn, uint8_t *rTurn);
 bool agv_parse_segment_start(const agv_packet_t *pkt, uint16_t *segment_id, uint16_t *src_rfid_id, uint16_t *dst_rfid_id);
 bool agv_parse_segment_complete(const agv_packet_t *pkt, uint16_t *segment_id);
+bool agv_parse_set_pid_tuning(const agv_packet_t *pkt, float *kpL, float *kiL, float *kdL, float *kpR, float *kiR, float *kdR);
+bool agv_parse_set_encoder_config(const agv_packet_t *pkt, float *wheel_circ_mm, uint16_t *ppr_l, uint16_t *ppr_r);
+bool agv_parse_tof_data(const agv_packet_t *pkt, uint16_t *left_mm, uint16_t *center_mm, uint16_t *right_mm);
 
 #ifdef __cplusplus
 }

@@ -149,13 +149,26 @@ void setCurrentError(const String &source, const String &code, const String &des
     currentActiveError.active = true;
 }
 
-// Web Serial Monitor implementations
+// Web Serial Monitor implementations (Thread-Safe across Core 0 & Core 1)
 static std::vector<String> webSerialLogs;
 static const size_t MAX_LOG_LINES = 50;
 static String currentLinePending = "";
+static SemaphoreHandle_t webSerialMutex = NULL;
+
+static void initWebSerialMutex() {
+    if (webSerialMutex == NULL) {
+        webSerialMutex = xSemaphoreCreateMutex();
+    }
+}
 
 void webSerialPrint(const String &text) {
     Serial.print(text);
+    initWebSerialMutex();
+
+    if (webSerialMutex != NULL) {
+        xSemaphoreTake(webSerialMutex, portMAX_DELAY);
+    }
+
     currentLinePending += text;
     
     int idx;
@@ -176,6 +189,10 @@ void webSerialPrint(const String &text) {
         }
         currentLinePending = currentLinePending.substring(idx + 1);
     }
+
+    if (webSerialMutex != NULL) {
+        xSemaphoreGive(webSerialMutex);
+    }
 }
 
 void webSerialPrintln(const String &text) {
@@ -185,15 +202,34 @@ void webSerialPrintln(const String &text) {
 JsonDocument getWebSerialLogs() {
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
+    initWebSerialMutex();
+
+    if (webSerialMutex != NULL) {
+        xSemaphoreTake(webSerialMutex, portMAX_DELAY);
+    }
+
     for (const auto &log : webSerialLogs) {
         arr.add(log);
+    }
+
+    if (webSerialMutex != NULL) {
+        xSemaphoreGive(webSerialMutex);
     }
     return doc;
 }
 
 void clearWebSerialLogs() {
+    initWebSerialMutex();
+    if (webSerialMutex != NULL) {
+        xSemaphoreTake(webSerialMutex, portMAX_DELAY);
+    }
+
     webSerialLogs.clear();
     currentLinePending = "";
+
+    if (webSerialMutex != NULL) {
+        xSemaphoreGive(webSerialMutex);
+    }
 }
 
 void handleSerialCommand(const String &cmd) {

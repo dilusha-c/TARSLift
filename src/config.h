@@ -42,6 +42,11 @@ struct Settings {
     bool enable_error_log;
     bool enable_system_info;
 
+    // Navigation and Routing Settings
+    int nav_mode;             // 0 = Direct Route, 1 = Topological Shortest Path
+    int drive_method;         // 0 = Waypoint (Point-to-Point), 1 = Pure Pursuit
+    float lookahead_distance; // mm
+
     // 2. Communication
     bool enable_stm32_uart;
     bool enable_websocket;
@@ -51,6 +56,25 @@ struct Settings {
     bool enable_encoder;
     bool enable_mpu6050;
     bool enable_pid;
+    
+    // Encoder & Kinematics Configuration
+    float wheel_circ_mm;
+    uint16_t enc_ppr_l;
+    uint16_t enc_ppr_r;
+    
+    // Motor Trim (Software Differential Scaling)
+    uint16_t motor_l_fwd_scale;  // 0-200%
+    uint16_t motor_r_fwd_scale;  // 0-200%
+    uint16_t motor_l_turn_scale; // 0-200%
+    uint16_t motor_r_turn_scale; // 0-200%
+
+    // PID tuning constants
+    float pid_kp_l;
+    float pid_ki_l;
+    float pid_kd_l;
+    float pid_kp_r;
+    float pid_ki_r;
+    float pid_kd_r;
 
     // 4. RFID
     bool rfid_reader;
@@ -63,6 +87,7 @@ struct Settings {
     bool centre_tof;
     bool right_tof;
     bool obstacle_detection;
+    float tof_stop_distance_mm;
 
     // 6. Battery
     bool battery_monitoring;
@@ -122,7 +147,7 @@ void applyProfileDefaults(int profileIndex);
 #define WIFI_MAX_CONN           4
 
 // UART
-#define STM32_UART_RX_PIN   16
+#define STM32_UART_RX_PIN   18
 #define STM32_UART_TX_PIN   17
 #define STM32_UART_BAUD     115200
 

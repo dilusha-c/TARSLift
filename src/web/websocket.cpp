@@ -5,6 +5,7 @@
 #include "system/system_manager.h"
 #include "routes/route_manager.h"
 #include "errors/error_logger.h"
+#include "communication/uart_manager.h"
 
 static AsyncWebSocket ws("/ws");
 
@@ -16,7 +17,43 @@ static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsE
     } else if (type == WS_EVT_DISCONNECT) {
         Serial.printf("WebSocket: Client #%u disconnected\n", client->id());
     } else if (type == WS_EVT_DATA) {
-        // Handle incoming WebSocket messages if any
+        AwsFrameInfo *info = (AwsFrameInfo*)arg;
+        if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
+            data[len] = 0;
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, (char*)data);
+            if (!err) {
+                if (doc["type"] == "update_pid") {
+                    JsonObject d = doc["data"];
+                    float kpL = d["kpL"] | 0.0f;
+                    float kiL = d["kiL"] | 0.0f;
+                    float kdL = d["kdL"] | 0.0f;
+                    float kpR = d["kpR"] | 0.0f;
+                    float kiR = d["kiR"] | 0.0f;
+                    float kdR = d["kdR"] | 0.0f;
+                    sendStm32PidTuning(kpL, kiL, kdL, kpR, kiR, kdR);
+                    Serial.println("WebSocket: Sent new PID tuning to STM32");
+                }
+                else if (doc["type"] == "update_encoder_config") {
+                    JsonObject d = doc["data"];
+                    float wheelCircMm = d["wheel_circ_mm"] | 138.2f;
+                    uint16_t pprL = d["ppr_l"] | 287;
+                    uint16_t pprR = d["ppr_r"] | 287;
+                    sendStm32EncoderConfig(wheelCircMm, pprL, pprR);
+                    Serial.println("WebSocket: Sent new encoder config to STM32");
+                }
+                else if (doc["type"] == "calibrate_imu") {
+                    sendStm32CalibrateImu();
+                    Serial.println("WebSocket: Sent IMU calibrate command to STM32");
+                }
+                else if (doc["type"] == "update_tof_config") {
+                    JsonObject d = doc["data"];
+                    float stopDistanceMm = d["stop_distance_mm"] | 150.0f;
+                    sendStm32TofConfig(stopDistanceMm);
+                    Serial.println("WebSocket: Sent ToF config to STM32");
+                }
+            }
+        }
     }
 }
 
@@ -31,6 +68,7 @@ void webSocketInit(AsyncWebServer *server) {
 void broadcastTelemetry() {
     if (!ENABLE_WEBSOCKET) return;
     if (ws.count() == 0) return; // No clients connected
+    if (!ws.availableForWriteAll()) return; // Skip frame if client write queue is full to prevent overflow log
 
     JsonDocument doc;
     
@@ -99,6 +137,12 @@ void broadcastTelemetry() {
     motor["left_rpm"] = tele.left_rpm;
     motor["right_rpm"] = tele.right_rpm;
     motor["target_rpm"] = tele.target_rpm;
+    doc["enc_l_rpm"] = tele.left_rpm;
+    doc["enc_r_rpm"] = tele.right_rpm;
+    doc["enc_l_mms"] = tele.left_mms;
+    doc["enc_r_mms"] = tele.right_mms;
+    doc["raw_enc_l"] = tele.raw_enc_l;
+    doc["raw_enc_r"] = tele.raw_enc_r;
 
     // System Health & Diagnostics
     SystemHealth health = getSystemHealth();
@@ -178,4 +222,10 @@ bool isWebSocketClientConnected() {
         return ws.count() > 0;
     }
     return false;
+}
+
+void cleanupWebSocketClients() {
+    if (ENABLE_WEBSOCKET) {
+        ws.cleanupClients();
+    }
 }

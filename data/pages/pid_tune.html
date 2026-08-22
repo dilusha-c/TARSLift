@@ -1,0 +1,79 @@
+<h2>PID Tuning & Encoders</h2>
+<div class="card">
+    <div class="card-header">
+        <h3>Live Encoder Speeds</h3>
+    </div>
+    <div class="card-body">
+        <div class="settings-grid">
+            <div class="setting-item">
+                <label>Left Motor RPM</label>
+                <span id="live-enc-l-rpm" class="value-display">0</span>
+            </div>
+            <div class="setting-item">
+                <label>Right Motor RPM</label>
+                <span id="live-enc-r-rpm" class="value-display">0</span>
+            </div>
+            <div class="setting-item">
+                <label>Left Speed (mm/s)</label>
+                <span id="live-enc-l-mms" class="value-display">0</span>
+            </div>
+            <div class="setting-item">
+                <label>Right Speed (mm/s)</label>
+                <span id="live-enc-r-mms" class="value-display">0</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h3>Encoder Calibration</h3>
+    </div>
+    <div class="card-body">
+        <div class="settings-grid">
+            <div class="setting-item">
+                <label for="set-enc-ppr-l">Left Pulses Per Revolution (PPR)</label>
+                <input type="number" id="set-enc-ppr-l" value="287" min="1" max="10000">
+            </div>
+            <div class="setting-item">
+                <label for="set-enc-ppr-r">Right Pulses Per Revolution (PPR)</label>
+                <input type="number" id="set-enc-ppr-r" value="287" min="1" max="10000">
+            </div>
+            <div class="setting-item">
+                <label for="set-wheel-circ">Wheel Circumference (mm)</label>
+                <input type="number" id="set-wheel-circ" value="138.2" step="0.1" min="10">
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h3>Motor Trims (Hardware Sync)</h3>
+    </div>
+    <div class="card-body">
+        <p class="text-muted" style="margin-bottom: 15px;">Adjust these sliders to slow down a faster motor until it matches the physical speed of the slower motor.</p>
+        <div class="settings-grid">
+            <div class="setting-item slider-item">
+                <label for="set-trim-l-fwd">Left Fwd Trim: <span id="lbl-trim-l-fwd">100</span>%</label>
+                <input type="range" id="set-trim-l-fwd" min="0" max="200" value="100">
+            </div>
+            <div class="setting-item slider-item">
+                <label for="set-trim-r-fwd">Right Fwd Trim: <span id="lbl-trim-r-fwd">100</span>%</label>
+                <input type="range" id="set-trim-r-fwd" min="0" max="200" value="100">
+            </div>
+            <div class="setting-item slider-item">
+                <label for="set-trim-l-turn">Left Turn Trim: <span id="lbl-trim-l-turn">100</span>%</label>
+                <input type="range" id="set-trim-l-turn" min="0" max="200" value="100">
+            </div>
+            <div class="setting-item slider-item">
+                <label for="set-trim-r-turn">Right Turn Trim: <span id="lbl-trim-r-turn">100</span>%</label>
+                <input type="range" id="set-trim-r-turn" min="0" max="200" value="100">
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="settings-actions">
+    <button class="btn btn-primary" id="btn-pid-save">Save PID & Encoder Settings</button>
+</div>

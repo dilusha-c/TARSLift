@@ -95,12 +95,44 @@ To wipe all data from the AGV flash memory and restart the system:
 
 ## 4. Compilation and Uploading
 
-### Compiling and Uploading Firmware
+### Compiling and Uploading ESP32 Firmware
 Open the workspace directory in PlatformIO (VS Code):
-1. Compile the firmware.
-2. Upload the compiled binary to the ESP32-S3 board.
+1. **Compile**: Click the **Build** checkmark (✓) in the PlatformIO status bar.
+2. **Flash Firmware**: Click the **Upload** arrow (➔).
+3. **Upload Web Assets**: In the PlatformIO sidebar, go to **Project Tasks** ➔ **Platform** ➔ **Upload Filesystem Image** (or run `pio run --target uploadfs`).
 
-### Uploading LittleFS Assets
-The web assets located in the `data/` folder must be uploaded to the ESP32-S3 flash partition using the LittleFS filesystem:
-1. Run the **Build Filesystem Image** command in PlatformIO.
-2. Run the **Upload Filesystem Image** command to write the web dashboard files.
+### Compiling and Uploading STM32 Co-Processor Firmware
+Open the `TARSLift_AGV` directory in **STM32CubeIDE**:
+1. Click **Project ➔ Clean...** then **Project ➔ Build All**.
+2. Click **Run ➔ Run** (Ctrl+F11) to flash the STM32 via ST-Link.
+
+---
+
+## 5. Comprehensive Documentation Index
+
+Each subsystem and folder contains its own dedicated technical manual explaining hardware wiring, theory of operation, and API functions:
+
+- **System Architecture & Theories**: [docs/architecture.md](file:///f:/Projects/AGV/docs/architecture.md)
+- **Web Dashboard Operating Manual**: [docs/dashboard.md](file:///f:/Projects/AGV/docs/dashboard.md)
+- **Subsystem Testing & Verification Guide**: [docs/testing.md](file:///f:/Projects/AGV/docs/testing.md)
+- **UART Protocol Specification**: [docs/uart_protocol_spec.md](file:///f:/Projects/AGV/docs/uart_protocol_spec.md)
+- **UART Integration Guide**: [docs/uart_integration.md](file:///f:/Projects/AGV/docs/uart_integration.md)
+
+### Subsystem Technical Manuals
+- **ESP32 Firmware Master Architecture**: [src/README.md](file:///f:/Projects/AGV/src/README.md)
+- **Battery & Power Monitoring**: [src/battery/README.md](file:///f:/Projects/AGV/src/battery/README.md)
+- **STM32 UART Communication & Watchdog**: [src/communication/README.md](file:///f:/Projects/AGV/src/communication/README.md)
+- **Configuration & Profiles**: [src/config/README.md](file:///f:/Projects/AGV/src/config/README.md)
+- **Telemetry Simulator (Demo Mode)**: [src/demo/README.md](file:///f:/Projects/AGV/src/demo/README.md)
+- **Error Logging & WebSerial**: [src/errors/README.md](file:///f:/Projects/AGV/src/errors/README.md)
+- **Hardware Abstraction Layer**: [src/hardware/README.md](file:///f:/Projects/AGV/src/hardware/README.md)
+- **Mission Execution State Machine**: [src/mission/README.md](file:///f:/Projects/AGV/src/mission/README.md)
+- **RFID Ground Station Subsystem**: [src/rfid/README.md](file:///f:/Projects/AGV/src/rfid/README.md)
+- **Route Trajectories & Shortest Path**: [src/routes/README.md](file:///f:/Projects/AGV/src/routes/README.md)
+- **System Management & LittleFS**: [src/system/README.md](file:///f:/Projects/AGV/src/system/README.md)
+- **Web Server & WebSocket Telemetry**: [src/web/README.md](file:///f:/Projects/AGV/src/web/README.md)
+- **Protocol Library (Shared C++)**: [lib/AGV_Communication/README.md](file:///f:/Projects/AGV/lib/AGV_Communication/README.md)
+- **Web UI & LittleFS Assets**: [data/README.md](file:///f:/Projects/AGV/data/README.md)
+- **STM32 Co-Processor Firmware**: [TARSLift_AGV/README.md](file:///f:/Projects/AGV/TARSLift_AGV/README.md)
+- **STM32 Core Drivers**: [TARSLift_AGV/Core/README.md](file:///f:/Projects/AGV/TARSLift_AGV/Core/README.md)
+- **STM32 Protocol Engine (C)**: [TARSLift_AGV/AGV_Communication/README.md](file:///f:/Projects/AGV/TARSLift_AGV/AGV_Communication/README.md)

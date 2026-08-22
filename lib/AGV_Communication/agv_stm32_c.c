@@ -5,7 +5,6 @@
    AGV UART PROTOCOL SPECIFICATION - PURE C IMPLEMENTATION FOR STM32F103
    ============================================================================ */
 
-/* CRC-16-CCITT (CCITT-FALSE variant, Poly 0x1021, Init 0xFFFF) */
 uint16_t agv_crc16_calc(const uint8_t *data, uint16_t len) {
     uint16_t crc = 0xFFFF;
     for (uint16_t i = 0; i < len; i++) {
@@ -26,7 +25,7 @@ uint16_t agv_encode_packet(const agv_packet_t *pkt, uint8_t *out_buf, uint16_t m
         return 0;
     }
 
-    uint16_t required_len = 2 + 1 + 1 + 2 + pkt->length + 2; // SOF(2)+CMD(1)+SEQ(1)+LEN(2)+PAYLOAD+CRC(2)
+    uint16_t required_len = 2 + 1 + 1 + 2 + pkt->length + 2;
     if (max_len < required_len) {
         return 0;
     }
@@ -43,7 +42,6 @@ uint16_t agv_encode_packet(const agv_packet_t *pkt, uint8_t *out_buf, uint16_t m
         out_buf[idx++] = pkt->payload[i];
     }
 
-    // CRC over CMD + SEQ + LEN + PAYLOAD
     uint16_t crc_calc_len = 4 + pkt->length;
     uint16_t crc = agv_crc16_calc(&out_buf[2], crc_calc_len);
 
@@ -239,6 +237,24 @@ uint16_t agv_build_odometry(int32_t left_mm, int32_t right_mm, int16_t yaw_deg_x
     return agv_encode_packet(&pkt, out_buf, max_len);
 }
 
+uint16_t agv_build_encoder_data(int32_t left_pulses, int32_t right_pulses, uint8_t seq, uint8_t *out_buf, uint16_t max_len) {
+    agv_packet_t pkt;
+    pkt.cmd = AGV_CMD_ENCODER_DATA;
+    pkt.seq = seq;
+    pkt.length = 8;
+    pkt.payload[0] = (uint8_t)(left_pulses & 0xFF);
+    pkt.payload[1] = (uint8_t)((left_pulses >> 8) & 0xFF);
+    pkt.payload[2] = (uint8_t)((left_pulses >> 16) & 0xFF);
+    pkt.payload[3] = (uint8_t)((left_pulses >> 24) & 0xFF);
+
+    pkt.payload[4] = (uint8_t)(right_pulses & 0xFF);
+    pkt.payload[5] = (uint8_t)((right_pulses >> 8) & 0xFF);
+    pkt.payload[6] = (uint8_t)((right_pulses >> 16) & 0xFF);
+    pkt.payload[7] = (uint8_t)((right_pulses >> 24) & 0xFF);
+
+    return agv_encode_packet(&pkt, out_buf, max_len);
+}
+
 uint16_t agv_build_imu_data(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16_t gz, int16_t yaw_deg_x10, uint8_t seq, uint8_t *out_buf, uint16_t max_len) {
     agv_packet_t pkt;
     pkt.cmd = AGV_CMD_IMU_DATA;
@@ -251,6 +267,17 @@ uint16_t agv_build_imu_data(int16_t ax, int16_t ay, int16_t az, int16_t gx, int1
     pkt.payload[8] = (uint8_t)(gy & 0xFF); pkt.payload[9] = (uint8_t)((gy >> 8) & 0xFF);
     pkt.payload[10] = (uint8_t)(gz & 0xFF); pkt.payload[11] = (uint8_t)((gz >> 8) & 0xFF);
     pkt.payload[12] = (uint8_t)(yaw_deg_x10 & 0xFF); pkt.payload[13] = (uint8_t)((yaw_deg_x10 >> 8) & 0xFF);
+    return agv_encode_packet(&pkt, out_buf, max_len);
+}
+
+uint16_t agv_build_tof_data(uint16_t left_mm, uint16_t center_mm, uint16_t right_mm, uint8_t seq, uint8_t *out_buf, uint16_t max_len) {
+    agv_packet_t pkt;
+    pkt.cmd = AGV_CMD_TOF_DATA;
+    pkt.seq = seq;
+    pkt.length = 6;
+    pkt.payload[0] = (uint8_t)(left_mm & 0xFF); pkt.payload[1] = (uint8_t)((left_mm >> 8) & 0xFF);
+    pkt.payload[2] = (uint8_t)(center_mm & 0xFF); pkt.payload[3] = (uint8_t)((center_mm >> 8) & 0xFF);
+    pkt.payload[4] = (uint8_t)(right_mm & 0xFF); pkt.payload[5] = (uint8_t)((right_mm >> 8) & 0xFF);
     return agv_encode_packet(&pkt, out_buf, max_len);
 }
 
@@ -308,6 +335,15 @@ bool agv_parse_set_repeat_speed(const agv_packet_t *pkt, uint16_t *speed_percent
     return true;
 }
 
+bool agv_parse_motor_trim(const agv_packet_t *pkt, uint8_t *lFwd, uint8_t *rFwd, uint8_t *lTurn, uint8_t *rTurn) {
+    if (pkt == NULL || pkt->cmd != AGV_CMD_SET_MOTOR_TRIM || pkt->length < 4) return false;
+    if (lFwd) *lFwd = pkt->payload[0];
+    if (rFwd) *rFwd = pkt->payload[1];
+    if (lTurn) *lTurn = pkt->payload[2];
+    if (rTurn) *rTurn = pkt->payload[3];
+    return true;
+}
+
 bool agv_parse_segment_start(const agv_packet_t *pkt, uint16_t *segment_id, uint16_t *src_rfid_id, uint16_t *dst_rfid_id) {
     if (pkt == NULL || pkt->cmd != AGV_CMD_SEGMENT_START || pkt->length < 6) return false;
     if (segment_id) *segment_id = (uint16_t)(pkt->payload[0] | (pkt->payload[1] << 8));
@@ -319,5 +355,32 @@ bool agv_parse_segment_start(const agv_packet_t *pkt, uint16_t *segment_id, uint
 bool agv_parse_segment_complete(const agv_packet_t *pkt, uint16_t *segment_id) {
     if (pkt == NULL || pkt->cmd != AGV_CMD_SEGMENT_COMPLETE || pkt->length < 2) return false;
     if (segment_id) *segment_id = (uint16_t)(pkt->payload[0] | (pkt->payload[1] << 8));
+    return true;
+}
+
+bool agv_parse_set_pid_tuning(const agv_packet_t *pkt, float *kpL, float *kiL, float *kdL, float *kpR, float *kiR, float *kdR) {
+    if (pkt == NULL || pkt->cmd != AGV_CMD_SET_PID_TUNING || pkt->length < 24) return false;
+    if (kpL) memcpy(kpL, &pkt->payload[0], 4);
+    if (kiL) memcpy(kiL, &pkt->payload[4], 4);
+    if (kdL) memcpy(kdL, &pkt->payload[8], 4);
+    if (kpR) memcpy(kpR, &pkt->payload[12], 4);
+    if (kiR) memcpy(kiR, &pkt->payload[16], 4);
+    if (kdR) memcpy(kdR, &pkt->payload[20], 4);
+    return true;
+}
+
+bool agv_parse_set_encoder_config(const agv_packet_t *pkt, float *wheel_circ_mm, uint16_t *ppr_l, uint16_t *ppr_r) {
+    if (pkt == NULL || pkt->cmd != AGV_CMD_SET_ENCODER_CONFIG || pkt->length < 8) return false;
+    if (wheel_circ_mm) memcpy(wheel_circ_mm, &pkt->payload[0], 4);
+    if (ppr_l) *ppr_l = (uint16_t)(pkt->payload[4] | (pkt->payload[5] << 8));
+    if (ppr_r) *ppr_r = (uint16_t)(pkt->payload[6] | (pkt->payload[7] << 8));
+    return true;
+}
+
+bool agv_parse_tof_data(const agv_packet_t *pkt, uint16_t *left_mm, uint16_t *center_mm, uint16_t *right_mm) {
+    if (pkt == NULL || pkt->cmd != AGV_CMD_TOF_DATA || pkt->length < 6) return false;
+    if (left_mm) *left_mm = (uint16_t)(pkt->payload[0] | (pkt->payload[1] << 8));
+    if (center_mm) *center_mm = (uint16_t)(pkt->payload[2] | (pkt->payload[3] << 8));
+    if (right_mm) *right_mm = (uint16_t)(pkt->payload[4] | (pkt->payload[5] << 8));
     return true;
 }

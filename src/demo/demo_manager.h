@@ -17,7 +17,11 @@ struct TelemetryData {
     uint16_t tof_right;
     int16_t left_rpm;
     int16_t right_rpm;
+    int16_t left_mms;
+    int16_t right_mms;
     int16_t target_rpm;
+    int32_t raw_enc_l;
+    int32_t raw_enc_r;
 };
 
 void demoManagerInit();
@@ -29,7 +33,9 @@ TelemetryData getTelemetry();
 // Real-time Telemetry updates from STM32 UART packets
 void updateTelemetryOdometry(float distanceMeters, float yawDeg);
 void updateTelemetryHeading(float yawDeg);
-void updateTelemetryMotors(int16_t leftRpm, int16_t rightRpm);
+void updateTelemetryMotors(int16_t leftRpm, int16_t rightRpm, int16_t leftMms, int16_t rightMms);
+void updateTelemetryRawEncoders(int32_t left, int32_t right);
+void updateTelemetryTof(uint16_t leftMm, uint16_t centerMm, uint16_t rightMm);
 
 // Input from client manual control
 void handleDemoManualMove(const String &direction, int speedPct);

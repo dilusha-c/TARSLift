@@ -20,7 +20,7 @@ void applyProfileDefaults(int profileIndex) {
     sysSettings.enable_error_log = true;
     sysSettings.enable_system_info = true;
 
-    sysSettings.enable_stm32_uart = false;
+    sysSettings.enable_stm32_uart = true;
     sysSettings.enable_websocket = true;
 
     sysSettings.enable_motor_control = false;
@@ -211,13 +211,33 @@ void loadSettings() {
                 sysSettings.enable_error_log = doc["enable_error_log"] | true;
                 sysSettings.enable_system_info = doc["enable_system_info"] | true;
 
-                sysSettings.enable_stm32_uart = doc["enable_stm32_uart"] | false;
+                sysSettings.nav_mode = doc["nav_mode"] | 0;
+                sysSettings.drive_method = doc["drive_method"] | 0;
+                sysSettings.lookahead_distance = doc["lookahead_distance"] | 300.0f;
+
+                sysSettings.enable_stm32_uart = doc["enable_stm32_uart"] | true;
                 sysSettings.enable_websocket = doc["enable_websocket"] | true;
 
                 sysSettings.enable_motor_control = doc["enable_motor_control"] | false;
                 sysSettings.enable_encoder = doc["enable_encoder"] | false;
                 sysSettings.enable_mpu6050 = doc["enable_mpu6050"] | false;
                 sysSettings.enable_pid = doc["enable_pid"] | false;
+
+                sysSettings.wheel_circ_mm = doc["wheel_circ_mm"] | 138.2f;
+                sysSettings.enc_ppr_l = doc["enc_ppr_l"] | 287;
+                sysSettings.enc_ppr_r = doc["enc_ppr_r"] | 287;
+                
+                sysSettings.pid_kp_l = doc["pid_kp_l"] | 1.0f;
+                sysSettings.pid_ki_l = doc["pid_ki_l"] | 0.0f;
+                sysSettings.pid_kd_l = doc["pid_kd_l"] | 0.0f;
+                sysSettings.pid_kp_r = doc["pid_kp_r"] | 1.0f;
+                sysSettings.pid_ki_r = doc["pid_ki_r"] | 0.0f;
+                sysSettings.pid_kd_r = doc["pid_kd_r"] | 0.0f;
+
+                sysSettings.motor_l_fwd_scale = doc["motor_l_fwd_scale"] | 100;
+                sysSettings.motor_r_fwd_scale = doc["motor_r_fwd_scale"] | 100;
+                sysSettings.motor_l_turn_scale = doc["motor_l_turn_scale"] | 100;
+                sysSettings.motor_r_turn_scale = doc["motor_r_turn_scale"] | 100;
 
                 sysSettings.rfid_reader = doc["rfid_reader"] | false;
                 sysSettings.rfid_manager_flag = doc["rfid_manager_flag"] | false;
@@ -228,6 +248,7 @@ void loadSettings() {
                 sysSettings.centre_tof = doc["centre_tof"] | false;
                 sysSettings.right_tof = doc["right_tof"] | false;
                 sysSettings.obstacle_detection = doc["obstacle_detection"] | false;
+                sysSettings.tof_stop_distance_mm = doc["tof_stop_distance_mm"] | 150.0f;
 
                 sysSettings.battery_monitoring = doc["battery_monitoring"] | false;
                 sysSettings.ina219 = doc["ina219"] | false;
@@ -283,8 +304,13 @@ void saveSettings() {
         doc["enable_repeat_mode"] = sysSettings.enable_repeat_mode;
         doc["enable_manual_control"] = sysSettings.enable_manual_control;
         doc["enable_route_manager"] = sysSettings.enable_route_manager;
-        doc["enable_rfid_manager"] = sysSettings.enable_rfid_manager;        doc["enable_error_log"] = sysSettings.enable_error_log;
+        doc["enable_rfid_manager"] = sysSettings.enable_rfid_manager;
+        doc["enable_error_log"] = sysSettings.enable_error_log;
         doc["enable_system_info"] = sysSettings.enable_system_info;
+
+        doc["nav_mode"] = sysSettings.nav_mode;
+        doc["drive_method"] = sysSettings.drive_method;
+        doc["lookahead_distance"] = sysSettings.lookahead_distance;
 
         doc["enable_stm32_uart"] = sysSettings.enable_stm32_uart;
         doc["enable_websocket"] = sysSettings.enable_websocket;
@@ -293,6 +319,22 @@ void saveSettings() {
         doc["enable_encoder"] = sysSettings.enable_encoder;
         doc["enable_mpu6050"] = sysSettings.enable_mpu6050;
         doc["enable_pid"] = sysSettings.enable_pid;
+
+        doc["wheel_circ_mm"] = sysSettings.wheel_circ_mm;
+        doc["enc_ppr_l"] = sysSettings.enc_ppr_l;
+        doc["enc_ppr_r"] = sysSettings.enc_ppr_r;
+
+        doc["pid_kp_l"] = sysSettings.pid_kp_l;
+        doc["pid_ki_l"] = sysSettings.pid_ki_l;
+        doc["pid_kd_l"] = sysSettings.pid_kd_l;
+        doc["pid_kp_r"] = sysSettings.pid_kp_r;
+        doc["pid_ki_r"] = sysSettings.pid_ki_r;
+        doc["pid_kd_r"] = sysSettings.pid_kd_r;
+
+        doc["motor_l_fwd_scale"] = sysSettings.motor_l_fwd_scale;
+        doc["motor_r_fwd_scale"] = sysSettings.motor_r_fwd_scale;
+        doc["motor_l_turn_scale"] = sysSettings.motor_l_turn_scale;
+        doc["motor_r_turn_scale"] = sysSettings.motor_r_turn_scale;
 
         doc["rfid_reader"] = sysSettings.rfid_reader;
         doc["rfid_manager_flag"] = sysSettings.rfid_manager_flag;
@@ -303,6 +345,7 @@ void saveSettings() {
         doc["centre_tof"] = sysSettings.centre_tof;
         doc["right_tof"] = sysSettings.right_tof;
         doc["obstacle_detection"] = sysSettings.obstacle_detection;
+        doc["tof_stop_distance_mm"] = sysSettings.tof_stop_distance_mm;
 
         doc["battery_monitoring"] = sysSettings.battery_monitoring;
         doc["ina219"] = sysSettings.ina219;

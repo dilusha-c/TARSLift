@@ -318,6 +318,37 @@ bool startRepeating(const String &routeId) {
     }
 }
 
+bool startRepeatingShortestPath(const String &startRfid, const String &destRfid) {
+    if (!ENABLE_REPEAT_MODE) return false;
+
+    // VERY BASIC SHORTEST PATH: For now, find an existing route that starts with startRfid and ends with destRfid
+    // In the future, this should construct a topological graph and run Dijkstra
+    
+    JsonDocument list = listRoutes();
+    JsonArray routes = list.as<JsonArray>();
+    
+    String foundRouteId = "";
+
+    for (JsonObject r : routes) {
+        String routeStart = r["start"].as<String>();
+        String routeDest = r["destination"].as<String>();
+
+        if (routeStart == startRfid && routeDest == destRfid) {
+            foundRouteId = r["id"].as<String>();
+            break;
+        }
+    }
+
+    if (foundRouteId != "") {
+        Serial.println("RouteManager: Found shortest path route: " + foundRouteId);
+        return startRepeating(foundRouteId);
+    } else {
+        Serial.println("RouteManager: No path found between " + startRfid + " and " + destRfid);
+        logError("SYSTEM", "E14", "No topological path found");
+        return false;
+    }
+}
+
 bool pauseRepeating() {
     if (currentMode == MODE_REPEAT && currentState == STATE_RUNNING) {
         currentState = STATE_PAUSED;

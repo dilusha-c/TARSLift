@@ -189,7 +189,19 @@ void updateTelemetryHeading(float yawDeg) {
     while (tele.heading >= 360.0f) tele.heading -= 360.0f;
 }
 
-void updateTelemetryMotors(int16_t leftRpm, int16_t rightRpm) {
+void updateTelemetryMotors(int16_t leftRpm, int16_t rightRpm, int16_t leftMms, int16_t rightMms) {
     tele.left_rpm = leftRpm;
     tele.right_rpm = rightRpm;
+    tele.left_mms = leftMms;
+    tele.right_mms = rightMms;
+}
+
+void updateTelemetryRawEncoders(int32_t left, int32_t right) {
+    tele.raw_enc_l = left;
+    tele.raw_enc_r = right;
+}
+void updateTelemetryTof(uint16_t leftMm, uint16_t centerMm, uint16_t rightMm) {
+    tele.tof_left = leftMm;
+    tele.tof_centre = centerMm;
+    tele.tof_right = rightMm;
 }

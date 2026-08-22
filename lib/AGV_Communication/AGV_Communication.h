@@ -50,11 +50,15 @@ public:
     // V2 Sensor / Motion Feedback (STM32 -> ESP32)
     bool makeOdometry(int32_t leftDistMm, int32_t rightDistMm, int16_t yawDegX10, AGVPacket& packet);
     bool makeIMUData(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16_t gz, int16_t yawDegX10, AGVPacket& packet);
+    bool makeEncoderData(int32_t leftPulses, int32_t rightPulses, AGVPacket& packet);
+    bool makeTofData(uint16_t leftMm, uint16_t centerMm, uint16_t rightMm, AGVPacket& packet);
     bool makeMotorStatus(int16_t leftPwm, int16_t rightPwm, int8_t leftDir, int8_t rightDir, AGVPacket& packet);
 
     // V2 Telemetry Payload Parsers
     static bool parseOdometry(const AGVPacket& packet, int32_t& leftDistMm, int32_t& rightDistMm, int16_t& yawDegX10);
     static bool parseIMUData(const AGVPacket& packet, int16_t& ax, int16_t& ay, int16_t& az, int16_t& gx, int16_t& gy, int16_t& gz, int16_t& yawDegX10);
+    static bool parseEncoderData(const AGVPacket& packet, int32_t& leftPulses, int32_t& rightPulses);
+    static bool parseTofData(const AGVPacket& packet, uint16_t& leftMm, uint16_t& centerMm, uint16_t& rightMm);
     static bool parseMotorStatus(const AGVPacket& packet, int16_t& leftPwm, int16_t& rightPwm, int8_t& leftDir, int8_t& rightDir);
 
     // V3 Motion Control & Completion (ESP32 <-> STM32)
@@ -62,6 +66,12 @@ public:
     bool turn(int16_t angleDegX10, uint16_t speedDegS, AGVPacket& packet);
     bool stop(AGVPacket& packet);
     bool setRepeatSpeed(uint16_t speedPercent, AGVPacket& packet);
+    bool setSpeeds(int16_t leftSpeedMmS, int16_t rightSpeedMmS, AGVPacket& packet);
+    bool setMotorTrim(uint8_t lFwd, uint8_t rFwd, uint8_t lTurn, uint8_t rTurn, AGVPacket& packet);
+    bool setPidTuning(float kpL, float kiL, float kdL, float kpR, float kiR, float kdR, AGVPacket& packet);
+    bool setEncoderConfig(float wheelCircMm, uint16_t pprL, uint16_t pprR, AGVPacket& packet);
+    bool calibrateImu(AGVPacket& packet);
+    bool setTofConfig(float stopDistanceMm, AGVPacket& packet);
 
     bool makeMoveDone(uint8_t origSeq, uint8_t result, AGVPacket& packet);
     bool makeTurnDone(uint8_t origSeq, uint8_t result, AGVPacket& packet);
@@ -70,6 +80,8 @@ public:
     static bool parseMove(const AGVPacket& packet, int32_t& distanceMm, uint16_t& speedMmS);
     static bool parseTurn(const AGVPacket& packet, int16_t& angleDegX10, uint16_t& speedDegS);
     static bool parseSetRepeatSpeed(const AGVPacket& packet, uint16_t& speedPercent);
+    static bool parseSetSpeeds(const AGVPacket& packet, int16_t& leftSpeedMmS, int16_t& rightSpeedMmS);
+    static bool parseMotorTrim(const AGVPacket& packet, uint8_t& lFwd, uint8_t& rFwd, uint8_t& lTurn, uint8_t& rTurn);
     static bool parseMoveDone(const AGVPacket& packet, uint8_t& origSeq, uint8_t& result);
     static bool parseTurnDone(const AGVPacket& packet, uint8_t& origSeq, uint8_t& result);
 

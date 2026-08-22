@@ -9,6 +9,7 @@
 #include "rfid/rfid_manager.h"
 #include "errors/error_logger.h"
 #include "demo/demo_manager.h"
+#include "communication/uart_manager.h"
 
 static AsyncWebServer server(80);
 
@@ -72,6 +73,10 @@ void webServerInit() {
         doc["heading"] = tele.heading;
         doc["speed"] = tele.speed;
         doc["rfid"] = tele.rfid;
+        doc["enc_l_rpm"] = tele.left_rpm;
+        doc["enc_r_rpm"] = tele.right_rpm;
+        doc["enc_l_mms"] = tele.left_mms;
+        doc["enc_r_mms"] = tele.right_mms;
 
         // Battery fields matching settings configuration
         if (sysSettings.battery_monitoring) {
@@ -270,16 +275,30 @@ void webServerInit() {
             return;
         }
 
-        String routeId = doc["id"] | "";
-        if (routeId == "") {
-            sendErrorResponse(request, "Route ID required");
-            return;
+        int mode = doc["mode"] | 0;
+        bool success = false;
+
+        if (mode == 0) {
+            String routeId = doc["id"] | "";
+            if (routeId == "") {
+                sendErrorResponse(request, "Route ID required");
+                return;
+            }
+            success = startRepeating(routeId);
+        } else {
+            String startRfid = doc["start_rfid"] | "";
+            String destRfid = doc["dest_rfid"] | "";
+            if (startRfid == "" || destRfid == "") {
+                sendErrorResponse(request, "Start and Dest RFIDs required");
+                return;
+            }
+            success = startRepeatingShortestPath(startRfid, destRfid);
         }
 
-        if (startRepeating(routeId)) {
+        if (success) {
             sendSuccessResponse(request, "Mission started");
         } else {
-            sendErrorResponse(request, "Cannot start repeat: Required hardware disabled");
+            sendErrorResponse(request, "Cannot start repeat: Required hardware disabled or route not found");
         }
     });
 
@@ -333,8 +352,23 @@ void webServerInit() {
         }
 
         if (direction == "STOP") {
+            sendStm32Stop();
             handleDemoManualStop();
         } else {
+            // Map percentage speed to actual velocities
+            uint16_t speedMmS = speed * 10; // max 1000 mm/s
+            uint16_t speedDegS = speed;     // max 100 deg/s
+            
+            if (direction == "FORWARD") {
+                sendStm32Move(10000, speedMmS); // Drive forward distance (10m)
+            } else if (direction == "REVERSE") {
+                sendStm32Move(-10000, speedMmS); // Drive reverse
+            } else if (direction == "LEFT") {
+                sendStm32Turn(-3600, speedDegS); // Turn left (negative yaw)
+            } else if (direction == "RIGHT") {
+                sendStm32Turn(3600, speedDegS); // Turn right (positive yaw)
+            }
+            
             handleDemoManualMove(direction, speed);
         }
         sendSuccessResponse(request, "Movement command sent");
@@ -342,6 +376,7 @@ void webServerInit() {
 
     // POST /api/manual/stop
     server.on("/api/manual/stop", HTTP_POST, [](AsyncWebServerRequest *request) {
+        sendStm32Stop();
         handleDemoManualStop();
         sendSuccessResponse(request, "Stop command sent");
     });
@@ -413,6 +448,10 @@ void webServerInit() {
         doc["enable_error_log"] = sysSettings.enable_error_log;
         doc["enable_system_info"] = sysSettings.enable_system_info;
 
+        doc["nav_mode"] = sysSettings.nav_mode;
+        doc["drive_method"] = sysSettings.drive_method;
+        doc["lookahead_distance"] = sysSettings.lookahead_distance;
+
         doc["enable_stm32_uart"] = sysSettings.enable_stm32_uart;
         doc["enable_websocket"] = sysSettings.enable_websocket;
 
@@ -420,6 +459,22 @@ void webServerInit() {
         doc["enable_encoder"] = sysSettings.enable_encoder;
         doc["enable_mpu6050"] = sysSettings.enable_mpu6050;
         doc["enable_pid"] = sysSettings.enable_pid;
+
+        doc["wheel_circ_mm"] = sysSettings.wheel_circ_mm;
+        doc["enc_ppr_l"] = sysSettings.enc_ppr_l;
+        doc["enc_ppr_r"] = sysSettings.enc_ppr_r;
+
+        doc["pid_kp_l"] = sysSettings.pid_kp_l;
+        doc["pid_ki_l"] = sysSettings.pid_ki_l;
+        doc["pid_kd_l"] = sysSettings.pid_kd_l;
+        doc["pid_kp_r"] = sysSettings.pid_kp_r;
+        doc["pid_ki_r"] = sysSettings.pid_ki_r;
+        doc["pid_kd_r"] = sysSettings.pid_kd_r;
+
+        doc["motor_l_fwd_scale"] = sysSettings.motor_l_fwd_scale;
+        doc["motor_r_fwd_scale"] = sysSettings.motor_r_fwd_scale;
+        doc["motor_l_turn_scale"] = sysSettings.motor_l_turn_scale;
+        doc["motor_r_turn_scale"] = sysSettings.motor_r_turn_scale;
 
         doc["rfid_reader"] = sysSettings.rfid_reader;
         doc["rfid_manager_flag"] = sysSettings.rfid_manager_flag;
@@ -430,6 +485,7 @@ void webServerInit() {
         doc["centre_tof"] = sysSettings.centre_tof;
         doc["right_tof"] = sysSettings.right_tof;
         doc["obstacle_detection"] = sysSettings.obstacle_detection;
+        doc["tof_stop_distance_mm"] = sysSettings.tof_stop_distance_mm;
 
         doc["battery_monitoring"] = sysSettings.battery_monitoring;
         doc["ina219"] = sysSettings.ina219;
@@ -471,6 +527,23 @@ void webServerInit() {
             }
         }
 
+        // Apply hardware trims regardless of profile
+        if (doc.containsKey("motor_l_fwd_scale")) sysSettings.motor_l_fwd_scale = doc["motor_l_fwd_scale"].as<uint16_t>();
+        if (doc.containsKey("motor_r_fwd_scale")) sysSettings.motor_r_fwd_scale = doc["motor_r_fwd_scale"].as<uint16_t>();
+        if (doc.containsKey("motor_l_turn_scale")) sysSettings.motor_l_turn_scale = doc["motor_l_turn_scale"].as<uint16_t>();
+        if (doc.containsKey("motor_r_turn_scale")) sysSettings.motor_r_turn_scale = doc["motor_r_turn_scale"].as<uint16_t>();
+
+        if (doc.containsKey("wheel_circ_mm")) sysSettings.wheel_circ_mm = doc["wheel_circ_mm"].as<float>();
+        if (doc.containsKey("enc_ppr_l")) sysSettings.enc_ppr_l = doc["enc_ppr_l"].as<uint16_t>();
+        if (doc.containsKey("enc_ppr_r")) sysSettings.enc_ppr_r = doc["enc_ppr_r"].as<uint16_t>();
+        
+        if (doc.containsKey("pid_kp_l")) sysSettings.pid_kp_l = doc["pid_kp_l"].as<float>();
+        if (doc.containsKey("pid_ki_l")) sysSettings.pid_ki_l = doc["pid_ki_l"].as<float>();
+        if (doc.containsKey("pid_kd_l")) sysSettings.pid_kd_l = doc["pid_kd_l"].as<float>();
+        if (doc.containsKey("pid_kp_r")) sysSettings.pid_kp_r = doc["pid_kp_r"].as<float>();
+        if (doc.containsKey("pid_ki_r")) sysSettings.pid_ki_r = doc["pid_ki_r"].as<float>();
+        if (doc.containsKey("pid_kd_r")) sysSettings.pid_kd_r = doc["pid_kd_r"].as<float>();
+
         // Apply changes individually if profile is CUSTOM or was overridden
         if (sysSettings.test_profile == PROFILE_CUSTOM) {
             if (doc.containsKey("enable_dashboard")) sysSettings.enable_dashboard = doc["enable_dashboard"];
@@ -481,6 +554,10 @@ void webServerInit() {
             if (doc.containsKey("enable_rfid_manager")) sysSettings.enable_rfid_manager = doc["enable_rfid_manager"];
             if (doc.containsKey("enable_error_log")) sysSettings.enable_error_log = doc["enable_error_log"];
             if (doc.containsKey("enable_system_info")) sysSettings.enable_system_info = doc["enable_system_info"];
+
+            if (doc.containsKey("nav_mode")) sysSettings.nav_mode = doc["nav_mode"].as<int>();
+            if (doc.containsKey("drive_method")) sysSettings.drive_method = doc["drive_method"].as<int>();
+            if (doc.containsKey("lookahead_distance")) sysSettings.lookahead_distance = doc["lookahead_distance"].as<float>();
 
             if (doc.containsKey("enable_stm32_uart")) sysSettings.enable_stm32_uart = doc["enable_stm32_uart"];
             if (doc.containsKey("enable_websocket")) sysSettings.enable_websocket = doc["enable_websocket"];
@@ -499,6 +576,7 @@ void webServerInit() {
             if (doc.containsKey("centre_tof")) sysSettings.centre_tof = doc["centre_tof"];
             if (doc.containsKey("right_tof")) sysSettings.right_tof = doc["right_tof"];
             if (doc.containsKey("obstacle_detection")) sysSettings.obstacle_detection = doc["obstacle_detection"];
+            if (doc.containsKey("tof_stop_distance_mm")) sysSettings.tof_stop_distance_mm = doc["tof_stop_distance_mm"].as<float>();
 
             if (doc.containsKey("battery_monitoring")) sysSettings.battery_monitoring = doc["battery_monitoring"];
             if (doc.containsKey("ina219")) sysSettings.ina219 = doc["ina219"];
@@ -530,6 +608,22 @@ void webServerInit() {
         }
 
         saveSettings();
+
+        // Broadcast updated motor trims to the STM32 via UART
+        if (sysSettings.enable_stm32_uart && !sysSettings.demo_mode) {
+            sendStm32MotorTrim(
+                sysSettings.motor_l_fwd_scale,
+                sysSettings.motor_r_fwd_scale,
+                sysSettings.motor_l_turn_scale,
+                sysSettings.motor_r_turn_scale
+            );
+            sendStm32EncoderConfig(
+                sysSettings.wheel_circ_mm,
+                sysSettings.enc_ppr_l,
+                sysSettings.enc_ppr_r
+            );
+        }
+
         sendSuccessResponse(request, "Settings updated successfully");
     });
 
