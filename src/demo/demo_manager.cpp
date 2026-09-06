@@ -27,7 +27,7 @@ void demoManagerInit() {
     tele.y = 0.0f;
     tele.heading = 0.0f;
     tele.speed = 0.0f;
-    tele.rfid = "START";
+    tele.rfid = "NONE";
     tele.battery_pct = 78.0f;
     tele.battery_volt = 11.6f;
     tele.battery_curr = 0.45f;
@@ -61,13 +61,14 @@ void demoManagerUpdate() {
 
         // Apply motion if a manual direction or repeat trajectory is active
         if (getAGVMode() == MODE_TEACH || getAGVMode() == MODE_IDLE) {
-            float speedVal = (driveSpeedPercentage / 100.0f) * 0.5f; // Max 0.5 m/s
+            // Target RPM to m/s
+            float speedVal = (driveSpeedPercentage * sysSettings.wheel_circ_mm) / 60000.0f;
 
             if (activeDirection == "FORWARD") {
                 tele.speed = speedVal;
-                tele.left_rpm = driveSpeedPercentage * 2;
-                tele.right_rpm = driveSpeedPercentage * 2;
-                tele.target_rpm = driveSpeedPercentage * 2;
+                tele.left_rpm = driveSpeedPercentage;
+                tele.right_rpm = driveSpeedPercentage;
+                tele.target_rpm = driveSpeedPercentage;
                 
                 // Calculate components based on heading (degrees to radians)
                 float rad = tele.heading * DEG_TO_RAD;
@@ -81,9 +82,9 @@ void demoManagerUpdate() {
             } 
             else if (activeDirection == "REVERSE") {
                 tele.speed = -speedVal;
-                tele.left_rpm = -driveSpeedPercentage * 2;
-                tele.right_rpm = -driveSpeedPercentage * 2;
-                tele.target_rpm = -driveSpeedPercentage * 2;
+                tele.left_rpm = -driveSpeedPercentage;
+                tele.right_rpm = -driveSpeedPercentage;
+                tele.target_rpm = -driveSpeedPercentage;
                 
                 float rad = tele.heading * DEG_TO_RAD;
                 tele.x += tele.speed * cos(rad) * dt;
@@ -98,14 +99,14 @@ void demoManagerUpdate() {
                 tele.left_rpm = -driveSpeedPercentage;
                 tele.right_rpm = driveSpeedPercentage;
                 tele.target_rpm = driveSpeedPercentage;
-                tele.heading -= 45.0f * dt; // Turn at 45 deg/sec
+                tele.heading -= (driveSpeedPercentage / 1.5f) * dt; // Turn at speedDegS
             } 
             else if (activeDirection == "RIGHT") {
                 tele.speed = 0.0f;
                 tele.left_rpm = driveSpeedPercentage;
                 tele.right_rpm = -driveSpeedPercentage;
                 tele.target_rpm = driveSpeedPercentage;
-                tele.heading += 45.0f * dt;
+                tele.heading += (driveSpeedPercentage / 1.5f) * dt;
             } 
             else {
                 // STOP
@@ -177,7 +178,7 @@ void handleDemoManualStop() {
 }
 
 void updateTelemetryOdometry(float distanceMeters, float yawDeg) {
-    tele.speed = distanceMeters;
+    // Keep heading updated, do not overwrite speed with distance!
     tele.heading = yawDeg;
     while (tele.heading < 0.0f) tele.heading += 360.0f;
     while (tele.heading >= 360.0f) tele.heading -= 360.0f;
@@ -194,6 +195,23 @@ void updateTelemetryMotors(int16_t leftRpm, int16_t rightRpm, int16_t leftMms, i
     tele.right_rpm = rightRpm;
     tele.left_mms = leftMms;
     tele.right_mms = rightMms;
+    // Calculate real linear speed in m/s
+    tele.speed = ((leftMms + rightMms) / 2.0f) / 1000.0f;
+}
+
+void resetTelemetryPosition() {
+    tele.x = 0.0f;
+    tele.y = 0.0f;
+}
+
+void updateTelemetryPositionDelta(float deltaMeters, float yawDeg) {
+    tele.heading = yawDeg;
+    while (tele.heading < 0.0f) tele.heading += 360.0f;
+    while (tele.heading >= 360.0f) tele.heading -= 360.0f;
+
+    float rad = tele.heading * DEG_TO_RAD;
+    tele.x += deltaMeters * cos(rad);
+    tele.y += deltaMeters * sin(rad);
 }
 
 void updateTelemetryRawEncoders(int32_t left, int32_t right) {
@@ -204,4 +222,14 @@ void updateTelemetryTof(uint16_t leftMm, uint16_t centerMm, uint16_t rightMm) {
     tele.tof_left = leftMm;
     tele.tof_centre = centerMm;
     tele.tof_right = rightMm;
+}
+
+void updateTelemetryRFID(const String &uid) {
+    tele.rfid = uid;
+}
+
+void updateTelemetryBattery(float volt, float curr, float pct) {
+    tele.battery_volt = volt;
+    tele.battery_curr = curr;
+    tele.battery_pct = pct;
 }

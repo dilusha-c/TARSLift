@@ -73,6 +73,10 @@ void webServerInit() {
         doc["heading"] = tele.heading;
         doc["speed"] = tele.speed;
         doc["rfid"] = tele.rfid;
+        doc["rfid_name"] = getRFIDTagName(tele.rfid);
+        doc["last_rfid"] = getLastScannedRFID();
+        doc["last_rfid_name"] = getRFIDTagName(getLastScannedRFID());
+        doc["rfid_hw_ok"] = isRFIDReaderHardwareReady();
         doc["enc_l_rpm"] = tele.left_rpm;
         doc["enc_r_rpm"] = tele.right_rpm;
         doc["enc_l_mms"] = tele.left_mms;
@@ -119,6 +123,21 @@ void webServerInit() {
     server.on("/api/routes", HTTP_GET, [](AsyncWebServerRequest *request) {
         JsonDocument doc = listRoutes();
         sendJsonResponse(request, doc);
+    });
+
+    // GET /api/route?id=<routeId>
+    server.on("/api/route", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (!request->hasParam("id")) {
+            sendErrorResponse(request, "Missing route ID");
+            return;
+        }
+        String routeId = request->getParam("id")->value();
+        String path = "/routes/" + routeId + ".json";
+        if (!LittleFS.exists(path)) {
+            sendErrorResponse(request, "Route not found");
+            return;
+        }
+        request->send(LittleFS, path, "application/json");
     });
 
     // GET /api/rfid
@@ -219,8 +238,8 @@ void webServerInit() {
         }
 
         String name = doc["name"] | "New Route";
-        String start = doc["start"] | "START";
-        String destination = doc["destination"] | "OFFICE";
+        String start = doc["start"] | "";
+        String destination = doc["destination"] | "";
         String description = doc["description"] | "";
 
         if (name.length() < 3) {
@@ -228,20 +247,28 @@ void webServerInit() {
             return;
         }
 
-        if (startTeaching(name, start, destination, description)) {
-            sendSuccessResponse(request, "Teaching started");
+        String errMsg = "";
+        if (startTeaching(name, start, destination, description, errMsg)) {
+            sendSuccessResponse(request, "Train mode started. Drive AGV to destination.");
         } else {
-            sendErrorResponse(request, "Failed to start teaching mode");
+            sendErrorResponse(request, errMsg.length() > 0 ? errMsg.c_str() : "Cannot start Train mode: Place AGV on an RFID tag first.");
         }
     });
 
     // POST /api/teach/stop
     server.on("/api/teach/stop", HTTP_POST, [](AsyncWebServerRequest *request) {
-        if (stopRecordingAndSave()) {
-            sendSuccessResponse(request, "Route saved successfully");
+        String errMsg = "";
+        if (stopRecordingAndSave(errMsg)) {
+            sendSuccessResponse(request, "Train Mode complete! Route saved successfully.");
         } else {
-            sendErrorResponse(request, "Failed to save route");
+            sendErrorResponse(request, errMsg.length() > 0 ? errMsg.c_str() : "Cannot end Train Mode: Destination RFID tag not detected!");
         }
+    });
+
+    // POST /api/teach/cancel
+    server.on("/api/teach/cancel", HTTP_POST, [](AsyncWebServerRequest *request) {
+        cancelRecording();
+        sendSuccessResponse(request, "Train mode cancelled.");
     });
 
     // POST /api/route/delete
@@ -339,10 +366,11 @@ void webServerInit() {
         }
 
         String direction = doc["direction"] | "STOP";
-        int speed = doc["speed"] | 50;
+        int speedRpm = doc["speed"] | 50; // Now interpreted as Target RPM
 
-        if (speed < 10 || speed > 100) {
-            sendErrorResponse(request, "Speed must be between 10% and 100%");
+        // Allow 10 to 400 RPM
+        if (speedRpm < 10 || speedRpm > 400) {
+            sendErrorResponse(request, "Target RPM must be between 10 and 400");
             return;
         }
 
@@ -355,9 +383,11 @@ void webServerInit() {
             sendStm32Stop();
             handleDemoManualStop();
         } else {
-            // Map percentage speed to actual velocities
-            uint16_t speedMmS = speed * 10; // max 1000 mm/s
-            uint16_t speedDegS = speed;     // max 100 deg/s
+            // Map Target RPM to mm/s for STM32 Move Command
+            uint16_t speedMmS = (uint16_t)((speedRpm * sysSettings.wheel_circ_mm) / 60.0f);
+            
+            // Map Target RPM to deg/s for STM32 Turn Command (STM32 does turn_rpm = speedDegS * 1.5)
+            uint16_t speedDegS = (uint16_t)(speedRpm / 1.5f);
             
             if (direction == "FORWARD") {
                 sendStm32Move(10000, speedMmS); // Drive forward distance (10m)
@@ -369,7 +399,7 @@ void webServerInit() {
                 sendStm32Turn(3600, speedDegS); // Turn right (positive yaw)
             }
             
-            handleDemoManualMove(direction, speed);
+            handleDemoManualMove(direction, speedRpm);
         }
         sendSuccessResponse(request, "Movement command sent");
     });
@@ -622,6 +652,11 @@ void webServerInit() {
                 sysSettings.enc_ppr_l,
                 sysSettings.enc_ppr_r
             );
+            sendStm32PidTuning(
+                sysSettings.pid_kp_l, sysSettings.pid_ki_l, sysSettings.pid_kd_l,
+                sysSettings.pid_kp_r, sysSettings.pid_ki_r, sysSettings.pid_kd_r
+            );
+            sendStm32PidEnable(sysSettings.enable_pid);
         }
 
         sendSuccessResponse(request, "Settings updated successfully");

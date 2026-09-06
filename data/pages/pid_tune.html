@@ -74,6 +74,79 @@
     </div>
 </div>
 
+<div class="card">
+    <div class="card-header">
+        <h3>Master PID Target Control</h3>
+    </div>
+    <div class="card-body">
+        <div class="settings-grid">
+            <div class="setting-item">
+                <label for="pid-master-toggle">Enable Master PID Control</label>
+                <label class="switch">
+                    <input type="checkbox" id="pid-master-toggle">
+                    <span class="slider round"></span>
+                </label>
+            </div>
+            <div class="setting-item slider-item">
+                <label for="set-target-rpm">Target Speed: <span id="lbl-target-rpm">0</span> RPM</label>
+                <input type="range" id="set-target-rpm" min="-250" max="250" value="0">
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h3>PID Tuning Parameters</h3>
+    </div>
+    <div class="card-body">
+        <div class="settings-grid">
+            <!-- Left Motor -->
+            <div class="setting-item">
+                <label for="set-pid-kp-l">Left Motor Kp</label>
+                <input type="number" id="set-pid-kp-l" step="0.01" value="1.00">
+            </div>
+            <div class="setting-item">
+                <label for="set-pid-ki-l">Left Motor Ki</label>
+                <input type="number" id="set-pid-ki-l" step="0.01" value="0.10">
+            </div>
+            <div class="setting-item">
+                <label for="set-pid-kd-l">Left Motor Kd</label>
+                <input type="number" id="set-pid-kd-l" step="0.01" value="0.05">
+            </div>
+            <!-- Right Motor -->
+            <div class="setting-item">
+                <label for="set-pid-kp-r">Right Motor Kp</label>
+                <input type="number" id="set-pid-kp-r" step="0.01" value="1.00">
+            </div>
+            <div class="setting-item">
+                <label for="set-pid-ki-r">Right Motor Ki</label>
+                <input type="number" id="set-pid-ki-r" step="0.01" value="0.10">
+            </div>
+            <div class="setting-item">
+                <label for="set-pid-kd-r">Right Motor Kd</label>
+                <input type="number" id="set-pid-kd-r" step="0.01" value="0.05">
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h3>PID Performance Graphs (Target vs Actual)</h3>
+    </div>
+    <div class="card-body">
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+            <div style="width: 100%; height: 250px;">
+                <canvas id="chart-motor-pid-l"></canvas>
+            </div>
+            <div style="width: 100%; height: 250px;">
+                <canvas id="chart-motor-pid-r"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="settings-actions">
     <button class="btn btn-primary" id="btn-pid-save">Save PID & Encoder Settings</button>
 </div>

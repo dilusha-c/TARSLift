@@ -270,6 +270,75 @@ uint16_t agv_build_imu_data(int16_t ax, int16_t ay, int16_t az, int16_t gx, int1
     return agv_encode_packet(&pkt, out_buf, max_len);
 }
 
+uint16_t agv_build_telemetry_sync(int32_t odom_l, int32_t odom_r, int32_t enc_l, int32_t enc_r, uint16_t tof_l, uint16_t tof_c, uint16_t tof_r, int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16_t gz, int16_t yaw_x10, uint8_t seq, uint8_t *out_buf, uint16_t max_len) {
+    agv_packet_t pkt;
+    pkt.cmd = AGV_CMD_TELEMETRY_SYNC;
+    pkt.seq = seq;
+    pkt.length = 38;
+    
+    // Odometry (8)
+    pkt.payload[0] = (uint8_t)(odom_l & 0xFF); pkt.payload[1] = (uint8_t)((odom_l >> 8) & 0xFF); pkt.payload[2] = (uint8_t)((odom_l >> 16) & 0xFF); pkt.payload[3] = (uint8_t)((odom_l >> 24) & 0xFF);
+    pkt.payload[4] = (uint8_t)(odom_r & 0xFF); pkt.payload[5] = (uint8_t)((odom_r >> 8) & 0xFF); pkt.payload[6] = (uint8_t)((odom_r >> 16) & 0xFF); pkt.payload[7] = (uint8_t)((odom_r >> 24) & 0xFF);
+    
+    // Encoders (8)
+    pkt.payload[8] = (uint8_t)(enc_l & 0xFF); pkt.payload[9] = (uint8_t)((enc_l >> 8) & 0xFF); pkt.payload[10] = (uint8_t)((enc_l >> 16) & 0xFF); pkt.payload[11] = (uint8_t)((enc_l >> 24) & 0xFF);
+    pkt.payload[12] = (uint8_t)(enc_r & 0xFF); pkt.payload[13] = (uint8_t)((enc_r >> 8) & 0xFF); pkt.payload[14] = (uint8_t)((enc_r >> 16) & 0xFF); pkt.payload[15] = (uint8_t)((enc_r >> 24) & 0xFF);
+    
+    // ToF (6)
+    pkt.payload[16] = (uint8_t)(tof_l & 0xFF); pkt.payload[17] = (uint8_t)((tof_l >> 8) & 0xFF);
+    pkt.payload[18] = (uint8_t)(tof_c & 0xFF); pkt.payload[19] = (uint8_t)((tof_c >> 8) & 0xFF);
+    pkt.payload[20] = (uint8_t)(tof_r & 0xFF); pkt.payload[21] = (uint8_t)((tof_r >> 8) & 0xFF);
+    
+    // IMU (14)
+    pkt.payload[22] = (uint8_t)(ax & 0xFF); pkt.payload[23] = (uint8_t)((ax >> 8) & 0xFF);
+    pkt.payload[24] = (uint8_t)(ay & 0xFF); pkt.payload[25] = (uint8_t)((ay >> 8) & 0xFF);
+    pkt.payload[26] = (uint8_t)(az & 0xFF); pkt.payload[27] = (uint8_t)((az >> 8) & 0xFF);
+    pkt.payload[28] = (uint8_t)(gx & 0xFF); pkt.payload[29] = (uint8_t)((gx >> 8) & 0xFF);
+    pkt.payload[30] = (uint8_t)(gy & 0xFF); pkt.payload[31] = (uint8_t)((gy >> 8) & 0xFF);
+    pkt.payload[32] = (uint8_t)(gz & 0xFF); pkt.payload[33] = (uint8_t)((gz >> 8) & 0xFF);
+    pkt.payload[34] = (uint8_t)(yaw_x10 & 0xFF); pkt.payload[35] = (uint8_t)((yaw_x10 >> 8) & 0xFF);
+    
+    // Yaw duplicate for odometry (already in IMU but kept for backward compatibility alignment if needed)
+    pkt.payload[36] = pkt.payload[34];
+    pkt.payload[37] = pkt.payload[35];
+
+    return agv_encode_packet(&pkt, out_buf, max_len);
+}
+
+uint16_t agv_build_set_pid_tuning(float kpL, float kiL, float kdL, float kpR, float kiR, float kdR, uint8_t seq, uint8_t *out_buf, uint16_t max_len) {
+    agv_packet_t pkt;
+    pkt.cmd = AGV_CMD_SET_PID_TUNING;
+    pkt.seq = seq;
+    pkt.length = 24;
+    memcpy(&pkt.payload[0], &kpL, 4);
+    memcpy(&pkt.payload[4], &kiL, 4);
+    memcpy(&pkt.payload[8], &kdL, 4);
+    memcpy(&pkt.payload[12], &kpR, 4);
+    memcpy(&pkt.payload[16], &kiR, 4);
+    memcpy(&pkt.payload[20], &kdR, 4);
+    return agv_encode_packet(&pkt, out_buf, max_len);
+}
+
+uint16_t agv_build_set_pid_enable(bool enabled, uint8_t seq, uint8_t *out_buf, uint16_t max_len) {
+    agv_packet_t pkt;
+    pkt.cmd = AGV_CMD_SET_PID_ENABLE;
+    pkt.seq = seq;
+    pkt.length = 1;
+    pkt.payload[0] = enabled ? 1 : 0;
+    return agv_encode_packet(&pkt, out_buf, max_len);
+}
+
+uint16_t agv_build_set_encoder_config(float wheel_circ_mm, uint16_t ppr_l, uint16_t ppr_r, uint8_t seq, uint8_t *out_buf, uint16_t max_len) {
+    agv_packet_t pkt;
+    pkt.cmd = AGV_CMD_SET_ENCODER_CONFIG;
+    pkt.seq = seq;
+    pkt.length = 8;
+    memcpy(&pkt.payload[0], &wheel_circ_mm, 4);
+    pkt.payload[4] = (uint8_t)(ppr_l & 0xFF); pkt.payload[5] = (uint8_t)((ppr_l >> 8) & 0xFF);
+    pkt.payload[6] = (uint8_t)(ppr_r & 0xFF); pkt.payload[7] = (uint8_t)((ppr_r >> 8) & 0xFF);
+    return agv_encode_packet(&pkt, out_buf, max_len);
+}
+
 uint16_t agv_build_tof_data(uint16_t left_mm, uint16_t center_mm, uint16_t right_mm, uint8_t seq, uint8_t *out_buf, uint16_t max_len) {
     agv_packet_t pkt;
     pkt.cmd = AGV_CMD_TOF_DATA;
@@ -335,6 +404,13 @@ bool agv_parse_set_repeat_speed(const agv_packet_t *pkt, uint16_t *speed_percent
     return true;
 }
 
+bool agv_parse_set_speeds(const agv_packet_t *pkt, int16_t *leftSpeedMmS, int16_t *rightSpeedMmS) {
+    if (pkt == NULL || pkt->cmd != AGV_CMD_SET_SPEEDS || pkt->length < 4) return false;
+    if (leftSpeedMmS) *leftSpeedMmS = (int16_t)(pkt->payload[0] | (pkt->payload[1] << 8));
+    if (rightSpeedMmS) *rightSpeedMmS = (int16_t)(pkt->payload[2] | (pkt->payload[3] << 8));
+    return true;
+}
+
 bool agv_parse_motor_trim(const agv_packet_t *pkt, uint8_t *lFwd, uint8_t *rFwd, uint8_t *lTurn, uint8_t *rTurn) {
     if (pkt == NULL || pkt->cmd != AGV_CMD_SET_MOTOR_TRIM || pkt->length < 4) return false;
     if (lFwd) *lFwd = pkt->payload[0];
@@ -369,6 +445,12 @@ bool agv_parse_set_pid_tuning(const agv_packet_t *pkt, float *kpL, float *kiL, f
     return true;
 }
 
+bool agv_parse_set_pid_enable(const agv_packet_t *pkt, bool *enabled) {
+    if (pkt == NULL || pkt->cmd != AGV_CMD_SET_PID_ENABLE || pkt->length < 1) return false;
+    if (enabled) *enabled = (pkt->payload[0] != 0);
+    return true;
+}
+
 bool agv_parse_set_encoder_config(const agv_packet_t *pkt, float *wheel_circ_mm, uint16_t *ppr_l, uint16_t *ppr_r) {
     if (pkt == NULL || pkt->cmd != AGV_CMD_SET_ENCODER_CONFIG || pkt->length < 8) return false;
     if (wheel_circ_mm) memcpy(wheel_circ_mm, &pkt->payload[0], 4);
@@ -383,4 +465,12 @@ bool agv_parse_tof_data(const agv_packet_t *pkt, uint16_t *left_mm, uint16_t *ce
     if (center_mm) *center_mm = (uint16_t)(pkt->payload[2] | (pkt->payload[3] << 8));
     if (right_mm) *right_mm = (uint16_t)(pkt->payload[4] | (pkt->payload[5] << 8));
     return true;
+}
+
+uint16_t agv_build_calibrate_imu(uint8_t seq, uint8_t *out_buf, uint16_t max_len) {
+    agv_packet_t pkt;
+    pkt.cmd = AGV_CMD_CALIBRATE_IMU;
+    pkt.seq = seq;
+    pkt.length = 0;
+    return agv_encode_packet(&pkt, out_buf, max_len);
 }

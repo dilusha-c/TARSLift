@@ -24,7 +24,7 @@
 #include <string.h>
 #include "agv_stm32_c.h"
 #include "motor.h"
-#include "mpu6050_lite.h"
+#include "mpu6050.h"
 #include "vl53l0x.h"
 /* USER CODE END Includes */
 
@@ -62,6 +62,15 @@ static int32_t current_right_dist_mm = 0;
 static int16_t current_yaw_deg_x10 = 0;
 static uint32_t last_telemetry_time = 0;
 
+// ============================================================================
+// CRASH FIX 1: DispatchCommand was called directly from the UART RxCplt ISR.
+// Calling HAL_UART_Transmit() (blocking) from inside an ISR is UNDEFINED
+// BEHAVIOR and will lock up the MCU when the transmit IRQ fires at higher
+// priority. Fix: set a pending flag in the ISR; dequeue & dispatch in main loop.
+// ============================================================================
+static volatile bool cmd_pending = false;
+static agv_packet_t pending_pkt;  // copy of last received packet
+
 // Motor Trim Percentages (100 = 100%, 80 = 80%, etc)
 static uint8_t trim_l_fwd = 100;
 static uint8_t trim_r_fwd = 100;
@@ -72,21 +81,97 @@ static uint8_t trim_r_turn = 100;
 static float pid_kp_L = 1.0f, pid_ki_L = 0.0f, pid_kd_L = 0.0f;
 static float pid_kp_R = 1.0f, pid_ki_R = 0.0f, pid_kd_R = 0.0f;
 static float pid_integral_L = 0.0f, pid_integral_R = 0.0f;
-static float pid_prev_err_L = 0.0f, pid_prev_err_R = 0.0f;
+
 
 static float target_rpm_L = 0.0f, target_rpm_R = 0.0f;
+static bool pid_enabled = true;
 static float enc_wheel_circ_mm = 138.2f;
 static uint16_t enc_ppr_l = 287;
 static uint16_t enc_ppr_r = 287;
 
+// BUG FIX 3: repeat_speed_pct stores the speed percentage (0-100) sent by
+// AGV_CMD_SET_REPEAT_SPEED. Previously this command was silently ignored.
+static uint16_t repeat_speed_pct = 100; // default 100%
+
 static uint32_t last_pid_time = 0;
+static uint32_t last_tof_time = 0;  // Separate timer for ToF reads (slower rate)
+static uint16_t cached_tof_l = 0, cached_tof_c = 0, cached_tof_r = 0;
 
 static VL53L0X_Dev_t tof_left;
 static VL53L0X_Dev_t tof_center;
 static VL53L0X_Dev_t tof_right;
-static MPU6050_Data_t mpu_data;
+static MPU6050_t mpu_data;
+static float current_yaw_float = 0.0f;
+static float gyro_z_offset = 0.0f;
+static bool calibrating_imu = false;
+static uint16_t calib_samples = 0;
+static float calib_sum = 0.0f;
+static uint32_t i2c_error_count = 0;
 
 /* USER CODE END PV */
+
+#define FLASH_USER_PAGE_ADDR 0x0800FC00 // Last 1KB page of 64K flash
+
+void Load_IMU_Offset(void) {
+    uint32_t magic = *(__IO uint32_t*)(FLASH_USER_PAGE_ADDR + 4);
+    if (magic == 0xDEADBEEF) {
+        uint32_t data_offset = *(__IO uint32_t*)FLASH_USER_PAGE_ADDR;
+        memcpy(&gyro_z_offset, &data_offset, sizeof(float));
+        
+        uint32_t data_yaw = *(__IO uint32_t*)(FLASH_USER_PAGE_ADDR + 8);
+        memcpy(&current_yaw_float, &data_yaw, sizeof(float));
+    }
+}
+
+void Save_IMU_Offset(void) {
+    // CRASH FIX 2: Flash erase/program MUST NOT be interrupted by the UART ISR.
+    HAL_NVIC_DisableIRQ(USART2_IRQn);
+
+    HAL_FLASH_Unlock();
+
+    // Clear any lingering error flags (PGERR, WRPERR) that would instantly block the erase/write
+    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_PGERR | FLASH_FLAG_WRPERR);
+
+    // Wait for any ongoing flash operation to complete
+    FLASH_WaitForLastOperation(HAL_MAX_DELAY);
+
+    FLASH_EraseInitTypeDef erase;
+    uint32_t pageError = 0;
+    erase.TypeErase = FLASH_TYPEERASE_PAGES;
+    erase.Banks = FLASH_BANK_1;
+    erase.PageAddress = FLASH_USER_PAGE_ADDR;
+    erase.NbPages = 1;
+
+    HAL_StatusTypeDef status = HAL_FLASHEx_Erase(&erase, &pageError);
+    if (status == HAL_OK) {
+        uint32_t data_offset, data_yaw;
+        memcpy(&data_offset, &gyro_z_offset, sizeof(float));
+        memcpy(&data_yaw, &current_yaw_float, sizeof(float));
+        
+        status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_USER_PAGE_ADDR, data_offset);
+        if (status == HAL_OK) {
+            status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_USER_PAGE_ADDR + 4, 0xDEADBEEF);
+        }
+        if (status == HAL_OK) {
+            status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_USER_PAGE_ADDR + 8, data_yaw);
+        }
+    }
+    HAL_FLASH_Lock();
+
+    // Re-enable UART ISR and restart byte reception
+    HAL_NVIC_EnableIRQ(USART2_IRQn);
+    HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
+
+    // Verify the save by reading back
+    uint32_t verify_magic = *(__IO uint32_t*)(FLASH_USER_PAGE_ADDR + 4);
+    if (verify_magic != 0xDEADBEEF || status != HAL_OK) {
+        // Flash save FAILED — toggle LED fast to indicate error
+        for (int i = 0; i < 20; i++) {
+            HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+            HAL_Delay(50);
+        }
+    }
+}
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
@@ -98,6 +183,48 @@ static void MX_TIM3_Init(void);
 static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 void AGV_STM32_DispatchCommand(const agv_packet_t *pkt);
+
+// I2C runtime bus recovery: clocks SCL 9 times to free stuck slaves,
+// then reinitializes the I2C peripheral.
+void I2C_BusRecover(void) {
+    // 1. Deinit the HAL I2C peripheral
+    HAL_I2C_DeInit(&hi2c1);
+
+    // 2. Bit-bang SCL (PB6) 9 times as GPIO open-drain
+    GPIO_InitTypeDef recov = {0};
+    recov.Pin   = GPIO_PIN_6 | GPIO_PIN_7;
+    recov.Mode  = GPIO_MODE_OUTPUT_OD;
+    recov.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOB, &recov);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6 | GPIO_PIN_7, GPIO_PIN_SET);
+    HAL_Delay(1);
+    for (int i = 0; i < 9; i++) {
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET); HAL_Delay(1);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);   HAL_Delay(1);
+    }
+    // Generate STOP: SDA LOW -> HIGH while SCL HIGH
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); HAL_Delay(1);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);   HAL_Delay(1);
+    HAL_GPIO_DeInit(GPIOB, GPIO_PIN_6 | GPIO_PIN_7);
+
+    // 3. Reinit I2C peripheral
+    MX_I2C1_Init();
+}
+
+// Check if the I2C bus is in an error state and recover if needed.
+// Returns true if a recovery was performed (caller should skip sensor reads).
+bool I2C_CheckAndRecover(void) {
+    if (hi2c1.ErrorCode != HAL_I2C_ERROR_NONE ||
+        hi2c1.State == HAL_I2C_STATE_ERROR ||
+        hi2c1.State == HAL_I2C_STATE_BUSY ||
+        hi2c1.State == HAL_I2C_STATE_BUSY_TX ||
+        hi2c1.State == HAL_I2C_STATE_BUSY_RX) {
+        i2c_error_count++;
+        I2C_BusRecover();
+        return true;
+    }
+    return false;
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -111,7 +238,25 @@ void AGV_STM32_DispatchCommand(const agv_packet_t *pkt) {
             break;
         }
 
+        case AGV_CMD_CALIBRATE_IMU: {
+            calibrating_imu = true;
+            calib_samples = 0;
+            calib_sum = 0.0f;
+            current_yaw_float = 0.0f;
+            current_yaw_deg_x10 = 0;
+            uint16_t tx_len = agv_build_ack(AGV_CMD_CALIBRATE_IMU, AGV_RESULT_OK, pkt->seq, tx_buf, sizeof(tx_buf));
+            HAL_UART_Transmit(&huart2, tx_buf, tx_len, 100);
+            break;
+        }
+
         case AGV_CMD_SET_REPEAT_SPEED: {
+            // BUG FIX 3: Actually parse and store the speed percentage.
+            // agv_parse_set_repeat_speed() returns speed as a 0-100 percent value.
+            uint16_t spd_pct = 100;
+            if (agv_parse_set_repeat_speed(pkt, &spd_pct)) {
+                if (spd_pct > 100) spd_pct = 100;
+                repeat_speed_pct = spd_pct;
+            }
             uint16_t tx_len = agv_build_ack(AGV_CMD_SET_REPEAT_SPEED, AGV_RESULT_OK, pkt->seq, tx_buf, sizeof(tx_buf));
             HAL_UART_Transmit(&huart2, tx_buf, tx_len, 100);
             break;
@@ -136,6 +281,16 @@ void AGV_STM32_DispatchCommand(const agv_packet_t *pkt) {
                 pid_kp_L = kpL; pid_ki_L = kiL; pid_kd_L = kdL;
                 pid_kp_R = kpR; pid_ki_R = kiR; pid_kd_R = kdR;
                 uint16_t tx_len = agv_build_ack(AGV_CMD_SET_PID_TUNING, AGV_RESULT_OK, pkt->seq, tx_buf, sizeof(tx_buf));
+                HAL_UART_Transmit(&huart2, tx_buf, tx_len, 100);
+            }
+            break;
+        }
+
+        case AGV_CMD_SET_PID_ENABLE: {
+            bool enabled;
+            if (agv_parse_set_pid_enable(pkt, &enabled)) {
+                pid_enabled = enabled;
+                uint16_t tx_len = agv_build_ack(AGV_CMD_SET_PID_ENABLE, AGV_RESULT_OK, pkt->seq, tx_buf, sizeof(tx_buf));
                 HAL_UART_Transmit(&huart2, tx_buf, tx_len, 100);
             }
             break;
@@ -184,13 +339,14 @@ void AGV_STM32_DispatchCommand(const agv_packet_t *pkt) {
                 current_left_dist_mm += distance_mm;
                 current_right_dist_mm += distance_mm;
 
-                // Closed-Loop Drive Mapping
+                // Closed-Loop Drive Mapping: apply repeat_speed_pct scale
                 float target_rpm = (speed_mm_s * 60.0f) / enc_wheel_circ_mm;
-                
+                target_rpm = target_rpm * repeat_speed_pct / 100.0f;
+
                 if (distance_mm < 0) { // Reverse
                     target_rpm = -target_rpm;
                 }
-                
+
                 target_rpm_L = target_rpm;
                 target_rpm_R = target_rpm;
 
@@ -269,8 +425,17 @@ void AGV_STM32_DispatchCommand(const agv_packet_t *pkt) {
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     if (huart->Instance == USART2) {
+        // CRASH FIX 1: Do NOT call DispatchCommand() here.
+        // HAL_UART_Transmit() is a blocking call that waits on the TX-complete flag.
+        // Calling it from inside the UART ISR deadlocks when the TXE interrupt
+        // fires (same or lower priority) — the ISR never returns -> HardFault.
+        // Instead: parse the byte into the packet buffer, then set a flag for
+        // the main loop to pick up and execute the dispatch safely.
         if (agv_stm32_parser_feed(&agv_parser, rx_byte)) {
-            AGV_STM32_DispatchCommand(&agv_parser.rx_pkt);
+            if (!cmd_pending) {  // don't overwrite an unhandled packet
+                pending_pkt = agv_parser.rx_pkt;
+                cmd_pending = true;
+            }
         }
         HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
     }
@@ -323,6 +488,30 @@ int main(void)
   MX_TIM1_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
+
+  /* I2C BUS RECOVERY: If MCU resets mid-I2C transfer, a sensor may hold SDA
+     LOW, permanently locking the I2C peripheral. Before calling MX_I2C1_Init,
+     manually clock SCL 9 times as GPIO outputs to force any slave to release.
+     STM32F1 I2C1: SCL=PB6, SDA=PB7. */
+  {
+    GPIO_InitTypeDef recov = {0};
+    recov.Pin   = GPIO_PIN_6 | GPIO_PIN_7;
+    recov.Mode  = GPIO_MODE_OUTPUT_OD;  // open-drain to match I2C physical layer
+    recov.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOB, &recov);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6 | GPIO_PIN_7, GPIO_PIN_SET);
+    HAL_Delay(1);
+    for (int i = 0; i < 9; i++) {
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET); HAL_Delay(1);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);   HAL_Delay(1);
+    }
+    // Generate a STOP condition: SDA LOW -> HIGH while SCL is HIGH
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); HAL_Delay(1);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);   HAL_Delay(1);
+    // Deinit GPIO so HAL_I2C_Init can re-configure them in AF_OD mode
+    HAL_GPIO_DeInit(GPIOB, GPIO_PIN_6 | GPIO_PIN_7);
+  }
+
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   agv_stm32_parser_init(&agv_parser);
@@ -371,8 +560,17 @@ int main(void)
   startContinuous(&tof_center, 0);
   startContinuous(&tof_right, 0);
 
+  // CRASH FIX 3: VL53L0X ioTimeout is 0 by default, meaning checkTimeoutExpired()
+  // ALWAYS returns false -> while loops in readRangeContinuousMillimeters() spin
+  // forever if a sensor fails or I2C hangs. Set a 50ms timeout so a dead sensor
+  // returns 65535 instead of locking the MCU.
+  setTimeout(&tof_left, 50);
+  setTimeout(&tof_center, 50);
+  setTimeout(&tof_right, 50);
+
   // Init MPU6050
   MPU6050_Init(&hi2c1);
+  Load_IMU_Offset();
 
   /* USER CODE END 2 */
 
@@ -384,20 +582,76 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     uint32_t now = HAL_GetTick();
+
+    // CRASH FIX 1: Process any command queued by the UART ISR safely from the
+    // main loop context, where HAL_UART_Transmit() blocking calls are safe.
+    if (cmd_pending) {
+        // Take a local copy of the packet BEFORE clearing the flag.
+        // This prevents a race where the ISR fires after clear but before
+        // we finish reading the struct.
+        agv_packet_t local_pkt = pending_pkt;
+        cmd_pending = false;  // clear flag so ISR can queue next packet
+        AGV_STM32_DispatchCommand(&local_pkt);
+    }
+
     static uint32_t last_led_time = 0;
-    if (now - last_led_time >= 500) { 
+    if (now - last_led_time >= 500) {
         last_led_time = now;
         HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
     }
 
     if (now - last_pid_time >= 20) { // 50Hz PID loop
         float dt = (now - last_pid_time) / 1000.0f;
+
+        // BUG FIX 5: Guard against dt == 0 (same millisecond tick)
+        if (dt < 0.001f) {
+            goto pid_skip;
+        }
+
+        // I2C HEALTH CHECK: If bus is stuck, recover before reading sensors.
+        if (I2C_CheckAndRecover()) {
+            // Bus was in error — skip this PID cycle, sensors need reinit time
+            goto pid_skip;
+        }
+
+        // We successfully passed all checks, now we can commit the new timestamp
         last_pid_time = now;
 
+        // MPU6050 Read and Integrate
+        MPU6050_Read_All(&hi2c1, &mpu_data);
+        
+        if (calibrating_imu) {
+            calib_sum += mpu_data.Gz;
+            calib_samples++;
+            if (calib_samples >= 100) { // 2 seconds at 50Hz
+                gyro_z_offset = calib_sum / 100.0f;
+                calibrating_imu = false;
+                Save_IMU_Offset();
+            }
+        } else {
+            // Integrate Gyro Z (Gz is in degrees/second)
+            // Subtract offset to prevent drift
+            float raw_gz = mpu_data.Gz - gyro_z_offset;
+            
+            // Add a deadband to ignore tiny sensor noise when perfectly still
+            if (raw_gz > -0.3f && raw_gz < 0.3f) {
+                raw_gz = 0.0f;
+            }
+            
+            current_yaw_float += raw_gz * dt;
+            
+            // Wrap around -180 to 180
+            if (current_yaw_float > 180.0f) current_yaw_float -= 360.0f;
+            if (current_yaw_float < -180.0f) current_yaw_float += 360.0f;
+            
+            current_yaw_deg_x10 = (int16_t)(current_yaw_float * 10.0f);
+        }
+
         // Read real hardware encoders (16-bit cast to handle underflow/overflow correctly for deltas)
+        // Fix swapped encoder wiring and invert right encoder polarity
         static int32_t last_enc_l = 0, last_enc_r = 0;
-        int32_t current_enc_l = -(int16_t)__HAL_TIM_GET_COUNTER(&htim2);
-        int32_t current_enc_r = (int16_t)__HAL_TIM_GET_COUNTER(&htim3);
+        int32_t current_enc_l = (int16_t)__HAL_TIM_GET_COUNTER(&htim3);
+        int32_t current_enc_r = -(int16_t)__HAL_TIM_GET_COUNTER(&htim2);
         
         int16_t delta_l = (int16_t)(current_enc_l - last_enc_l);
         int16_t delta_r = (int16_t)(current_enc_r - last_enc_r);
@@ -407,25 +661,118 @@ int main(void)
         float actual_rpm_L = ((float)delta_l / enc_ppr_l) / dt * 60.0f;
         float actual_rpm_R = ((float)delta_r / enc_ppr_r) / dt * 60.0f;
 
-        // PID Left
-        float err_L = target_rpm_L - actual_rpm_L;
-        pid_integral_L += err_L * dt;
-        float deriv_L = (err_L - pid_prev_err_L) / dt;
-        pid_prev_err_L = err_L;
-        float out_L = (pid_kp_L * err_L) + (pid_ki_L * pid_integral_L) + (pid_kd_L * deriv_L);
+        // Static variables for Derivative on Measurement
+        static float prev_actual_rpm_L = 0.0f;
+        static float prev_actual_rpm_R = 0.0f;
 
-        // PID Right
-        float err_R = target_rpm_R - actual_rpm_R;
+        // ----- IMU HEADING ASSIST -----
+        // Uses the MPU6050 yaw to fix heading drift when going straight ("no change")
+        static float target_heading = 0.0f;
+        static bool was_turning = true;
+        
+        float current_target_L = target_rpm_L;
+        float current_target_R = target_rpm_R;
+        
+        if (target_rpm_L != target_rpm_R || target_rpm_L == 0.0f) {
+            was_turning = true; // Not moving straight, or stopped
+        } else {
+            if (was_turning) {
+                target_heading = current_yaw_float; // Lock in the heading
+                was_turning = false;
+            }
+            
+            // Calculate how far we drifted from our locked heading
+            float heading_error = current_yaw_float - target_heading;
+            
+            // Wrap around -180 to 180
+            if (heading_error > 180.0f) heading_error -= 360.0f;
+            if (heading_error < -180.0f) heading_error += 360.0f;
+            
+            // Proportional correction: adjust target RPM based on drift
+            // (e.g. 1.0 RPM per degree of error)
+            float assist_kp_rpm = 2.0f; 
+            float correction_rpm = heading_error * assist_kp_rpm;
+            
+            // Limit the maximum correction so we don't accidentally ask a motor 
+            // to do 300 RPM just to fix a sharp drift
+            if (correction_rpm > 30.0f) correction_rpm = 30.0f;
+            if (correction_rpm < -30.0f) correction_rpm = -30.0f;
+            
+            // Apply correction
+            current_target_L += correction_rpm;
+            current_target_R -= correction_rpm;
+            
+            // Absolute safety clamp for target RPMs to prevent surging out of control
+            if (current_target_L > 200.0f) current_target_L = 200.0f;
+            if (current_target_L < -200.0f) current_target_L = -200.0f;
+            if (current_target_R > 200.0f) current_target_R = 200.0f;
+            if (current_target_R < -200.0f) current_target_R = -200.0f;
+        }
+        // ------------------------------
+
+        // ----- PID Left -----
+        float err_L = current_target_L - actual_rpm_L;
+        
+        // Anti-Windup for Integral (clamp to max PWM contribution)
+        float max_i_L = (pid_ki_L > 0.0001f) ? (1000.0f / pid_ki_L) : 0.0f;
+        pid_integral_L += err_L * dt;
+        if (max_i_L > 0.0f) {
+            if (pid_integral_L > max_i_L) pid_integral_L = max_i_L;
+            if (pid_integral_L < -max_i_L) pid_integral_L = -max_i_L;
+        } else {
+            pid_integral_L = 0.0f;
+        }
+
+        // Derivative on Measurement (prevents derivative kick on target changes)
+        float deriv_L = -(actual_rpm_L - prev_actual_rpm_L) / dt;
+        prev_actual_rpm_L = actual_rpm_L;
+
+        // Feed-Forward (open loop base speed estimation)
+        float ff_L = current_target_L * (1000.0f / 330.0f);
+        
+        float out_L = ff_L + (pid_kp_L * err_L) + (pid_ki_L * pid_integral_L) + (pid_kd_L * deriv_L);
+
+
+        // ----- PID Right -----
+        float err_R = current_target_R - actual_rpm_R;
+        
+        // Anti-Windup for Integral
+        float max_i_R = (pid_ki_R > 0.0001f) ? (1000.0f / pid_ki_R) : 0.0f;
         pid_integral_R += err_R * dt;
-        float deriv_R = (err_R - pid_prev_err_R) / dt;
-        pid_prev_err_R = err_R;
-        float out_R = (pid_kp_R * err_R) + (pid_ki_R * pid_integral_R) + (pid_kd_R * deriv_R);
+        if (max_i_R > 0.0f) {
+            if (pid_integral_R > max_i_R) pid_integral_R = max_i_R;
+            if (pid_integral_R < -max_i_R) pid_integral_R = -max_i_R;
+        } else {
+            pid_integral_R = 0.0f;
+        }
+
+        // Derivative on Measurement
+        float deriv_R = -(actual_rpm_R - prev_actual_rpm_R) / dt;
+        prev_actual_rpm_R = actual_rpm_R;
+
+        // Feed-Forward (open loop base speed estimation)
+        float ff_R = current_target_R * (1000.0f / 330.0f);
+
+        float out_R = ff_R + (pid_kp_R * err_R) + (pid_ki_R * pid_integral_R) + (pid_kd_R * deriv_R);
 
         // Apply output
         if (target_rpm_L == 0.0f && target_rpm_R == 0.0f) {
             Motor_SetSpeed(0, 0);
             pid_integral_L = 0;
             pid_integral_R = 0;
+        } else if (!pid_enabled) {
+            // Open-loop control (assume 330 RPM = max PWM 1000)
+            int16_t pwm_L = (int16_t)(current_target_L * (1000.0f / 330.0f));
+            int16_t pwm_R = (int16_t)(current_target_R * (1000.0f / 330.0f));
+
+            if (pwm_L > 1000) pwm_L = 1000;
+            if (pwm_L < -1000) pwm_L = -1000;
+            if (pwm_R > 1000) pwm_R = 1000;
+            if (pwm_R < -1000) pwm_R = -1000;
+            // BUG FIX 4: Apply motor trim factors to open-loop output
+            pwm_L = (int16_t)((pwm_L >= 0) ? (pwm_L * trim_l_fwd / 100) : (pwm_L * trim_l_turn / 100));
+            pwm_R = (int16_t)((pwm_R >= 0) ? (pwm_R * trim_r_fwd / 100) : (pwm_R * trim_r_turn / 100));
+            Motor_SetSpeed(pwm_L, pwm_R);
         } else {
             int16_t pwm_L = (int16_t)out_L;
             if (pwm_L > 1000) pwm_L = 1000;
@@ -435,13 +782,33 @@ int main(void)
             if (pwm_R > 1000) pwm_R = 1000;
             if (pwm_R < -1000) pwm_R = -1000;
 
+            // BUG FIX 4: Apply motor trim factors to closed-loop (PID) output
+            pwm_L = (int16_t)((pwm_L >= 0) ? (pwm_L * trim_l_fwd / 100) : (pwm_L * trim_l_turn / 100));
+            pwm_R = (int16_t)((pwm_R >= 0) ? (pwm_R * trim_r_fwd / 100) : (pwm_R * trim_r_turn / 100));
+
             Motor_SetSpeed(pwm_L, pwm_R);
         }
     }
+    pid_skip:;
 
-    if (now - last_telemetry_time >= 50) { // 20Hz Odometry Telemetry to ESP32
+    // ================================================================
+    // ToF sensors: Read at 5Hz (every 200ms) instead of 20Hz.
+    // Each VL53L0X read can take up to 50ms on timeout, so reading
+    // all 3 at 20Hz (50ms cycle) can starve the MPU6050 PID loop.
+    // ================================================================
+    if (now - last_tof_time >= 200) {
+        last_tof_time = now;
+        // Non-blocking architecture: Only read if data is ready.
+        // If a sensor fails or hangs, it will be skipped instantly!
+        if (!I2C_CheckAndRecover()) {
+            if (isDataReady(&tof_left)) cached_tof_l = readRangeContinuousMillimeters(&tof_left, NULL);
+            if (isDataReady(&tof_center)) cached_tof_c = readRangeContinuousMillimeters(&tof_center, NULL);
+            if (isDataReady(&tof_right)) cached_tof_r = readRangeContinuousMillimeters(&tof_right, NULL);
+        }
+    }
+
+    if (now - last_telemetry_time >= 50) { // 20Hz Unified Telemetry to ESP32
         last_telemetry_time = now;
-        uint16_t tx_len = agv_build_odometry(current_left_dist_mm, current_right_dist_mm, current_yaw_deg_x10, 0, tx_buffer, sizeof(tx_buffer));
         
         // Auto-recover from HAL UART error state if noise or overrun occurred
         if (huart2.ErrorCode != HAL_UART_ERROR_NONE || huart2.gState == HAL_UART_STATE_ERROR) {
@@ -451,27 +818,22 @@ int main(void)
             huart2.ErrorCode = HAL_UART_ERROR_NONE;
             huart2.gState = HAL_UART_STATE_READY;
         }
+
+        int32_t left_pulses = (int16_t)__HAL_TIM_GET_COUNTER(&htim3);
+        int32_t right_pulses = -(int16_t)__HAL_TIM_GET_COUNTER(&htim2);
+        
+        // Build unified telemetry packet
+        uint16_t tx_len = agv_build_telemetry_sync(
+            current_left_dist_mm, current_right_dist_mm, // Odometry
+            left_pulses, right_pulses,                   // Encoders
+            cached_tof_l, cached_tof_c, cached_tof_r,    // ToF
+            mpu_data.Accel_X_RAW, mpu_data.Accel_Y_RAW, mpu_data.Accel_Z_RAW, // IMU Accel
+            mpu_data.Gyro_X_RAW, mpu_data.Gyro_Y_RAW, mpu_data.Gyro_Z_RAW,    // IMU Gyro
+            current_yaw_deg_x10,                         // IMU Yaw
+            0, tx_buffer, sizeof(tx_buffer)
+        );
         
         HAL_UART_Transmit(&huart2, tx_buffer, tx_len, 50);
-
-        // We already read the hardware encoders in the PID loop, but for telemetry we can just fetch the counters directly
-        int32_t left_pulses = -(int16_t)__HAL_TIM_GET_COUNTER(&htim2);
-        int32_t right_pulses = (int16_t)__HAL_TIM_GET_COUNTER(&htim3);
-
-        uint16_t enc_tx_len = agv_build_encoder_data(left_pulses, right_pulses, 0, tx_buffer, sizeof(tx_buffer));
-        HAL_UART_Transmit(&huart2, tx_buffer, enc_tx_len, 50);
-
-        // Read and send ToF data
-        uint16_t dist_l = readRangeContinuousMillimeters(&tof_left, NULL);
-        uint16_t dist_c = readRangeContinuousMillimeters(&tof_center, NULL);
-        uint16_t dist_r = readRangeContinuousMillimeters(&tof_right, NULL);
-        uint16_t tof_tx_len = agv_build_tof_data(dist_l, dist_c, dist_r, 0, tx_buffer, sizeof(tx_buffer));
-        HAL_UART_Transmit(&huart2, tx_buffer, tof_tx_len, 50);
-
-        // Read and send MPU6050 data
-        MPU6050_Read_All(&hi2c1, &mpu_data);
-        uint16_t imu_tx_len = agv_build_imu_data(mpu_data.accel_x, mpu_data.accel_y, mpu_data.accel_z, mpu_data.gyro_x, mpu_data.gyro_y, mpu_data.gyro_z, 0, 0, tx_buffer, sizeof(tx_buffer));
-        HAL_UART_Transmit(&huart2, tx_buffer, imu_tx_len, 50);
     }
   }
   /* USER CODE END 3 */
@@ -657,11 +1019,11 @@ static void MX_TIM2_Init(void)
   sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 0;
+  sConfig.IC1Filter = 15;
   sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC2Filter = 0;
+  sConfig.IC2Filter = 15;
   if (HAL_TIM_Encoder_Init(&htim2, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -706,11 +1068,11 @@ static void MX_TIM3_Init(void)
   sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 0;
+  sConfig.IC1Filter = 15;
   sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC2Filter = 0;
+  sConfig.IC2Filter = 15;
   if (HAL_TIM_Encoder_Init(&htim3, &sConfig) != HAL_OK)
   {
     Error_Handler();

@@ -201,6 +201,7 @@ void stopContinuous(VL53L0X_Dev_t *dev);
 
 // Returns a range reading in millimeters when continuous mode is active.
 // Additional measurement data will be copied into `extraStats` if it is non-zero.
+bool isDataReady(VL53L0X_Dev_t *dev);
 uint16_t readRangeContinuousMillimeters(VL53L0X_Dev_t *dev, statInfo_t_VL53L0X *extraStats);
 
 // Performs a single-shot ranging measurement and returns the reading in millimeters.

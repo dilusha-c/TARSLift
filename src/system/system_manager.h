@@ -25,6 +25,7 @@ size_t getMinFreeHeap();
 size_t getMaxAllocHeap();
 uint32_t getCpuFreqMHz();
 
+
 void updatePerformanceMetrics(float loopMs, uint32_t loopHz, float cpuUsagePct);
 float getAverageLoopMs();
 uint32_t getLoopHz();

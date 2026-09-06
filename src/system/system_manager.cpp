@@ -12,11 +12,11 @@ void applyProfileDefaults(int profileIndex) {
     sysSettings.test_profile = profileIndex;
 
     sysSettings.enable_dashboard = true;
-    sysSettings.enable_teach_mode = false;
-    sysSettings.enable_repeat_mode = false;
-    sysSettings.enable_manual_control = false;
-    sysSettings.enable_route_manager = false;
-    sysSettings.enable_rfid_manager = false;
+    sysSettings.enable_teach_mode = true;
+    sysSettings.enable_repeat_mode = true;
+    sysSettings.enable_manual_control = true;
+    sysSettings.enable_route_manager = true;
+    sysSettings.enable_rfid_manager = true;
     sysSettings.enable_error_log = true;
     sysSettings.enable_system_info = true;
 
@@ -28,9 +28,9 @@ void applyProfileDefaults(int profileIndex) {
     sysSettings.enable_mpu6050 = false;
     sysSettings.enable_pid = false;
 
-    sysSettings.rfid_reader = false;
-    sysSettings.rfid_manager_flag = false;
-    sysSettings.rfid_checkpoints = false;
+    sysSettings.rfid_reader = true;
+    sysSettings.rfid_manager_flag = true;
+    sysSettings.rfid_checkpoints = true;
 
     sysSettings.tof_sensors = false;
     sysSettings.left_tof = false;

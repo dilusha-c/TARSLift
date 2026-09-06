@@ -59,6 +59,7 @@ public:
     static bool parseIMUData(const AGVPacket& packet, int16_t& ax, int16_t& ay, int16_t& az, int16_t& gx, int16_t& gy, int16_t& gz, int16_t& yawDegX10);
     static bool parseEncoderData(const AGVPacket& packet, int32_t& leftPulses, int32_t& rightPulses);
     static bool parseTofData(const AGVPacket& packet, uint16_t& leftMm, uint16_t& centerMm, uint16_t& rightMm);
+    static bool parseTelemetrySync(const AGVPacket& packet, int32_t& odom_l, int32_t& odom_r, int32_t& enc_l, int32_t& enc_r, uint16_t& tof_l, uint16_t& tof_c, uint16_t& tof_r, int16_t& ax, int16_t& ay, int16_t& az, int16_t& gx, int16_t& gy, int16_t& gz, int16_t& yaw_x10);
     static bool parseMotorStatus(const AGVPacket& packet, int16_t& leftPwm, int16_t& rightPwm, int8_t& leftDir, int8_t& rightDir);
 
     // V3 Motion Control & Completion (ESP32 <-> STM32)
@@ -69,6 +70,7 @@ public:
     bool setSpeeds(int16_t leftSpeedMmS, int16_t rightSpeedMmS, AGVPacket& packet);
     bool setMotorTrim(uint8_t lFwd, uint8_t rFwd, uint8_t lTurn, uint8_t rTurn, AGVPacket& packet);
     bool setPidTuning(float kpL, float kiL, float kdL, float kpR, float kiR, float kdR, AGVPacket& packet);
+    bool setPidEnable(bool enabled, AGVPacket& packet);
     bool setEncoderConfig(float wheelCircMm, uint16_t pprL, uint16_t pprR, AGVPacket& packet);
     bool calibrateImu(AGVPacket& packet);
     bool setTofConfig(float stopDistanceMm, AGVPacket& packet);

@@ -3,9 +3,12 @@
 #include "system/system_manager.h"
 #include "errors/error_logger.h"
 #include "demo/demo_manager.h"
+#include "rfid/rfid_manager.h"
 #include "AGV_Commands.h"
 #include "AGV_Protocol.h"
 #include "AGV_Responses.h"
+
+extern void processTeachOdometry(float deltaDist_m, float yawDeg);
 
 // Hardware Serial instance for STM32 UART link
 
@@ -143,6 +146,80 @@ static void processIncomingPacket(const AGVPacket& pkt) {
             break;
         }
 
+        case AGVCommand::TELEMETRY_SYNC: {
+            int32_t odom_l, odom_r, enc_l, enc_r;
+            uint16_t tof_l, tof_c, tof_r;
+            int16_t ax, ay, az, gx, gy, gz, yaw_x10;
+            
+            if (AGV_Communication::parseTelemetrySync(pkt, odom_l, odom_r, enc_l, enc_r, tof_l, tof_c, tof_r, ax, ay, az, gx, gy, gz, yaw_x10)) {
+                // 1. Update Heading
+                float yawDeg = yaw_x10 / 10.0f;
+                updateTelemetryHeading(yawDeg);
+                
+                // 2. Update ToF
+                updateTelemetryTof(tof_l, tof_c, tof_r);
+                
+                // 3. Update Encoders, RPM, Speed & Position Dead-Reckoning
+                static int32_t lastLeft = 0;
+                static int32_t lastRight = 0;
+                static unsigned long lastTime = 0;
+                static bool firstEnc = true;
+                unsigned long now = millis();
+                
+                if (firstEnc) {
+                    lastLeft = enc_l;
+                    lastRight = enc_r;
+                    lastTime = now;
+                    firstEnc = false;
+                } else if (now > lastTime) {
+                    float dt = (now - lastTime) / 1000.0f;
+                    int16_t deltaLeft16 = (int16_t)(enc_l - lastLeft);
+                    int16_t deltaRight16 = (int16_t)(enc_r - lastRight);
+                    
+                    static int32_t absLeft = 0;
+                    static int32_t absRight = 0;
+                    absLeft += deltaLeft16;
+                    absRight += deltaRight16;
+                    updateTelemetryRawEncoders(absLeft, absRight);
+                    
+                    // Only calculate RPM if dt is reasonable (avoid divide by near-zero UART jitter spikes)
+                    if (dt >= 0.010f) {
+                        float raw_l_rpm = ((float)deltaLeft16 / sysSettings.enc_ppr_l) / dt * 60.0f;
+                        float raw_r_rpm = ((float)deltaRight16 / sysSettings.enc_ppr_r) / dt * 60.0f;
+                        
+                        // Apply EMA low-pass filter to smooth out UART arrival jitter
+                        static float l_rpm = 0.0f;
+                        static float r_rpm = 0.0f;
+                        float alpha = 0.3f; // 30% new, 70% old
+                        l_rpm = (alpha * raw_l_rpm) + ((1.0f - alpha) * l_rpm);
+                        r_rpm = (alpha * raw_r_rpm) + ((1.0f - alpha) * r_rpm);
+                        
+                        float l_mms = (l_rpm / 60.0f) * sysSettings.wheel_circ_mm;
+                        float r_mms = (r_rpm / 60.0f) * sysSettings.wheel_circ_mm;
+                        
+                        updateTelemetryMotors((int16_t)l_rpm, (int16_t)r_rpm, (int16_t)l_mms, (int16_t)r_mms);
+
+                        // Real physical distance moved in meters
+                        float distL_m = ((float)deltaLeft16 / sysSettings.enc_ppr_l) * (sysSettings.wheel_circ_mm / 1000.0f);
+                        float distR_m = ((float)deltaRight16 / sysSettings.enc_ppr_r) * (sysSettings.wheel_circ_mm / 1000.0f);
+                        float deltaDist_m = (distL_m + distR_m) / 2.0f;
+
+                        // Dead-reckoning position update
+                        updateTelemetryPositionDelta(deltaDist_m, yawDeg);
+
+                        // If training route in live hardware, process teach odometry
+                        if (!DEMO_MODE) {
+                            processTeachOdometry(deltaDist_m, yawDeg);
+                        }
+                    }
+                }
+                lastLeft = enc_l;
+                lastRight = enc_r;
+                lastTime = now;
+            }
+            break;
+        }
+
         case AGVCommand::ODOMETRY: {
             int32_t leftDistMm = 0, rightDistMm = 0;
             int16_t yawDegX10 = 0;
@@ -170,7 +247,7 @@ static void processIncomingPacket(const AGVPacket& pkt) {
                 static unsigned long lastTofPrint = 0;
                 unsigned long now = millis();
                 if (now - lastTofPrint > 1000) {
-                    webSerialPrintln("STM32 UART: TOF L=" + String(leftMm) + "mm C=" + String(centerMm) + "mm R=" + String(rightMm) + "mm");
+                    // webSerialPrintln("STM32 UART: TOF L=" + String(leftMm) + "mm C=" + String(centerMm) + "mm R=" + String(rightMm) + "mm");
                     lastTofPrint = now;
                 }
             }
@@ -213,13 +290,23 @@ static void processIncomingPacket(const AGVPacket& pkt) {
                     absRight += deltaRight16;
                     updateTelemetryRawEncoders(absLeft, absRight);
                     
-                    float l_rpm = (dLeft / sysSettings.enc_ppr_l) / dt * 60.0f;
-                    float r_rpm = (dRight / sysSettings.enc_ppr_r) / dt * 60.0f;
-                    
-                    float l_mms = (l_rpm / 60.0f) * sysSettings.wheel_circ_mm;
-                    float r_mms = (r_rpm / 60.0f) * sysSettings.wheel_circ_mm;
-                    
-                    updateTelemetryMotors(l_rpm, r_rpm, l_mms, r_mms);
+                    // Only calculate RPM if dt is reasonable (avoid divide by near-zero UART jitter spikes)
+                    if (dt >= 0.010f) {
+                        float raw_l_rpm = ((float)deltaLeft16 / sysSettings.enc_ppr_l) / dt * 60.0f;
+                        float raw_r_rpm = ((float)deltaRight16 / sysSettings.enc_ppr_r) / dt * 60.0f;
+                        
+                        // Apply EMA low-pass filter to smooth out UART arrival jitter
+                        static float l_rpm = 0.0f;
+                        static float r_rpm = 0.0f;
+                        float alpha = 0.3f; // 30% new, 70% old
+                        l_rpm = (alpha * raw_l_rpm) + ((1.0f - alpha) * l_rpm);
+                        r_rpm = (alpha * raw_r_rpm) + ((1.0f - alpha) * r_rpm);
+                        
+                        float l_mms = (l_rpm / 60.0f) * sysSettings.wheel_circ_mm;
+                        float r_mms = (r_rpm / 60.0f) * sysSettings.wheel_circ_mm;
+                        
+                        updateTelemetryMotors(l_rpm, r_rpm, l_mms, r_mms);
+                    }
                 }
                 lastLeft = leftPulses;
                 lastRight = rightPulses;
@@ -396,6 +483,16 @@ bool sendStm32Move(int32_t distanceMm, uint16_t speedMmS) {
     return false;
 }
 
+bool sendStm32SetSpeeds(int16_t leftSpeedMmS, int16_t rightSpeedMmS) {
+    if (!sysSettings.enable_stm32_uart) return false;
+    AGVPacket pkt;
+    if (agvComm.setSpeeds(leftSpeedMmS, rightSpeedMmS, pkt)) {
+        sendPacketOverUart(pkt);
+        return true;
+    }
+    return false;
+}
+
 bool sendStm32Turn(int16_t angleDegX10, uint16_t speedDegS) {
     if (!sysSettings.enable_stm32_uart) return false;
     AGVPacket pkt;
@@ -443,6 +540,16 @@ bool sendStm32PidTuning(float kpL, float kiL, float kdL, float kpR, float kiR, f
     if (!sysSettings.enable_stm32_uart) return false;
     AGVPacket pkt;
     if (agvComm.setPidTuning(kpL, kiL, kdL, kpR, kiR, kdR, pkt)) {
+        sendPacketOverUart(pkt);
+        return true;
+    }
+    return false;
+}
+
+bool sendStm32PidEnable(bool enabled) {
+    if (!sysSettings.enable_stm32_uart) return false;
+    AGVPacket pkt;
+    if (agvComm.setPidEnable(enabled, pkt)) {
         sendPacketOverUart(pkt);
         return true;
     }

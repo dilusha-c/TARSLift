@@ -774,6 +774,11 @@ void stopContinuous(VL53L0X_Dev_t *dev)
   writeReg(dev, 0xFF, 0x00);
 }
 
+// Check if a measurement is ready without blocking
+bool isDataReady(VL53L0X_Dev_t *dev) {
+  return (readReg(dev, RESULT_INTERRUPT_STATUS) & 0x07) != 0;
+}
+
 // Returns a range reading in millimeters when continuous mode is active
 // (readRangeSingleMillimeters(dev) also calls this function after starting a
 // single-shot range measurement)

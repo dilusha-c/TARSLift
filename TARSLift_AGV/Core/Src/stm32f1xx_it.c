@@ -22,6 +22,17 @@
 #include "stm32f1xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+/* CRASH FIX 6: On any fatal fault (HardFault, NMI, BusFault) the motors must
+   be killed immediately. We directly zero the PWM compare registers and pull
+   STBY low without relying on HAL (which may be in a corrupted state). */
+#include "main.h"
+static inline void EmergencyMotorKill(void) {
+    // Zero both PWM channels on TIM1 (PWMA, PWMB)
+    TIM1->CCR1 = 0;
+    TIM1->CCR2 = 0;
+    // Pull STBY (PB12) LOW to cut motor driver power
+    GPIOB->BRR = GPIO_PIN_12;
+}
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -69,7 +80,7 @@ extern UART_HandleTypeDef huart2;
 void NMI_Handler(void)
 {
   /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
-
+  EmergencyMotorKill(); // Stop motors before hanging
   /* USER CODE END NonMaskableInt_IRQn 0 */
   /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
    while (1)
@@ -84,7 +95,7 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+  EmergencyMotorKill(); // Stop motors before hanging
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
@@ -114,7 +125,7 @@ void MemManage_Handler(void)
 void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
-
+  EmergencyMotorKill(); // Stop motors before hanging
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
   {

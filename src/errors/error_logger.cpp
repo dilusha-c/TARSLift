@@ -252,7 +252,11 @@ void handleSerialCommand(const String &cmd) {
         ESP.restart();
     } else if (trimmed.equalsIgnoreCase("/scan")) {
         webSerialPrintln("Triggering RFID card scanner simulation...");
-        startRFIDScan();
+        simulateRFIDScan();
+    } else if (trimmed.equalsIgnoreCase("/diag")) {
+        extern void testRFIDScan();
+        testRFIDScan();
+        webSerialPrintln("Printed diagnostics to USB Serial (Open Arduino Serial Monitor to see them!)");
     } else if (trimmed.equalsIgnoreCase("/clear")) {
         clearTodayLog();
         webSerialPrintln("Persistent error logs cleared successfully.");

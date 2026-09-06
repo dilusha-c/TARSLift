@@ -6,6 +6,7 @@
 #include "routes/route_manager.h"
 #include "errors/error_logger.h"
 #include "communication/uart_manager.h"
+#include "rfid/rfid_manager.h"
 
 static AsyncWebSocket ws("/ws");
 
@@ -52,6 +53,17 @@ static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsE
                     sendStm32TofConfig(stopDistanceMm);
                     Serial.println("WebSocket: Sent ToF config to STM32");
                 }
+                else if (doc["type"] == "update_target_rpm") {
+                    JsonObject d = doc["data"];
+                    float targetRpm = d["rpm"] | 0.0f;
+                    
+                    // Convert RPM to mm/s
+                    float circ = sysSettings.wheel_circ_mm > 0 ? sysSettings.wheel_circ_mm : 138.2f;
+                    int16_t speedMms = (int16_t)((targetRpm * circ) / 60.0f);
+                    
+                    sendStm32SetSpeeds(speedMms, speedMms);
+                    Serial.printf("WebSocket: Sent target RPM %.1f (%.1f mm/s) to STM32\n", targetRpm, (float)speedMms);
+                }
             }
         }
     }
@@ -90,7 +102,13 @@ void broadcastTelemetry() {
     doc["y"] = round(tele.y * 100.0) / 100.0;
     doc["heading"] = round(tele.heading * 10.0) / 10.0;
     doc["speed"] = round(tele.speed * 100.0) / 100.0;
+    doc["teach_distance"] = round(getTeachDistance() * 100.0) / 100.0;
+    doc["teach_duration"] = getTeachDurationS();
     doc["rfid"] = tele.rfid;
+    doc["rfid_name"] = getRFIDTagName(tele.rfid);
+    doc["last_rfid"] = getLastScannedRFID();
+    doc["last_rfid_name"] = getRFIDTagName(getLastScannedRFID());
+    doc["rfid_hw_ok"] = isRFIDReaderHardwareReady();
 
     // Battery fields matching settings configuration
     if (sysSettings.battery_monitoring) {

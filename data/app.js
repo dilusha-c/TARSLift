@@ -10,13 +10,23 @@ const apiUrl = `http://${gatewayIp}`;
 // App State
 let wsConn = null;
 let currentActiveView = "dashboard";
-let manualDriveSpeed = 50;
+let lastKeyMap = {};
+let manualDriveSpeed = 150; // Initial RPM
 let lastDriveCommand = "STOP";
 let lastCommandTime = 0;
 const COMMAND_THROTTLE_MS = 150; // Max frequency for manual commands
 
-// Scanning RFID State
+// Scanning & Global RFID State
 let isScanningRFID = false;
+let registeredRFIDTags = [];
+let lastKnownScannedRFID = "NONE";
+
+function getTagNameFromRegistry(uid) {
+    if (!uid || uid === "NONE") return "";
+    const clean = uid.trim().toUpperCase();
+    const found = registeredRFIDTags.find(t => t.uid && t.uid.trim().toUpperCase() === clean);
+    return found ? found.name : "";
+}
 
 // Premium Toast Notification System
 function showToast(message, type = "success") {
@@ -243,9 +253,6 @@ function updateDashboardTelemetry(tele) {
         // Update 2D Live Canvas Map
         updateMapTelemetry(tele);
 
-        document.getElementById("dash-rfid-uid").innerText = tele.rfid === "NONE" ? "NO TAG" : tele.rfid;
-        document.getElementById("dash-rfid-name").innerText = tele.rfid === "NONE" ? "No active checkpoint" : tele.rfid;
-
         document.getElementById("dash-bat-pct").innerText = tele.battery;
         document.getElementById("dash-bat-volt").innerText = tele.voltage;
         document.getElementById("dash-bat-curr").innerText = tele.current;
@@ -304,10 +311,25 @@ function updateDashboardTelemetry(tele) {
         }
     } 
     else if (currentActiveView === "teach") {
-        document.getElementById("teach-lbl-distance").innerText = `${tele.x.toFixed(2)} m`;
-        document.getElementById("teach-lbl-speed").innerText = `${tele.speed.toFixed(2)} m/s`;
-        document.getElementById("teach-lbl-heading").innerText = `${tele.heading.toFixed(1)}°`;
-        document.getElementById("teach-lbl-checkpoint").innerText = tele.rfid === "NONE" ? "No Tag" : tele.rfid;
+        const teachDist = (tele.teach_distance !== undefined && tele.teach_distance !== null) ? tele.teach_distance : Math.sqrt(tele.x * tele.x + tele.y * tele.y);
+        const distEl = document.getElementById("teach-lbl-distance");
+        if (distEl) distEl.innerText = `${teachDist.toFixed(2)} m`;
+
+        const speedEl = document.getElementById("teach-lbl-speed");
+        if (speedEl) speedEl.innerText = `${Math.abs(tele.speed || 0).toFixed(2)} m/s`;
+
+        const headEl = document.getElementById("teach-lbl-heading");
+        if (headEl) headEl.innerText = `${(tele.heading || 0).toFixed(1)}°`;
+
+        const cpEl = document.getElementById("teach-lbl-checkpoint");
+        if (cpEl) cpEl.innerText = tele.rfid === "NONE" ? "No Tag" : tele.rfid;
+
+        // Update Recording Time (MM:SS)
+        const durationSec = tele.teach_duration || 0;
+        const mins = Math.floor(durationSec / 60).toString().padStart(2, '0');
+        const secs = (durationSec % 60).toString().padStart(2, '0');
+        const timeEl = document.getElementById("teach-lbl-time");
+        if (timeEl) timeEl.innerText = `${mins}:${secs}`;
         
         // Disable/enable controls based on current mode
         const isRecording = (tele.mode === "TEACH" && tele.state === "RECORDING");
@@ -357,7 +379,8 @@ function updateDashboardTelemetry(tele) {
         
         if (typeof updatePidCharts === "function") {
             let target = 0;
-            if (tele.motor && tele.motor.target_rpm) target = tele.motor.target_rpm;
+            const targetSlider = document.getElementById("set-target-rpm");
+            if (targetSlider) target = parseFloat(targetSlider.value) || 0;
             updatePidCharts(target, tele.enc_l_rpm || 0, tele.enc_r_rpm || 0);
         }
 
@@ -375,10 +398,6 @@ function updateDashboardTelemetry(tele) {
             if (needle) needle.style.transform = `rotate(${tele.heading}deg)`;
         }
 
-        // RFID Updates
-        if (tele.rfid !== undefined) {
-            document.getElementById("sys-rfid-uid").innerText = tele.rfid === "NONE" ? "NO TAG" : tele.rfid;
-        }
 
         // Raw Encoder Updates for Calibration Tool
         if (tele.raw_enc_l !== undefined && tele.raw_enc_r !== undefined) {
@@ -391,7 +410,12 @@ function updateDashboardTelemetry(tele) {
                 const isLeft = sideSelect.value === "left";
                 const liveEl = document.getElementById("sys-raw-enc-live");
                 if (liveEl) {
-                    liveEl.innerText = isLeft ? tele.raw_enc_l : tele.raw_enc_r;
+                    let currentRaw = isLeft ? tele.raw_enc_l : tele.raw_enc_r;
+                    if (window.isPPRMeasuring && window.pprStartRaw !== undefined) {
+                        liveEl.innerText = Math.abs(currentRaw - window.pprStartRaw);
+                    } else {
+                        liveEl.innerText = currentRaw;
+                    }
                 }
             }
         }
@@ -472,7 +496,7 @@ function updateDashboardTelemetry(tele) {
         document.getElementById("sys-esp-uptime").innerText = `${h}:${m}:${s}`;
 
         const uartOk = (tele.health.uart === 2);
-        document.getElementById("sys-stm-conn").innerText = stmConnected ? "CONNECTED" : "DISCONNECTED";
+        document.getElementById("sys-stm-conn").innerText = (tele.health.stm32 === 2) ? "CONNECTED" : "DISCONNECTED";
         document.getElementById("sys-stm-uart").innerText = uartOk ? "UART2 (Active)" : "DISABLED";
 
         // Update live serial monitor logs
@@ -487,14 +511,195 @@ function updateDashboardTelemetry(tele) {
                 }
             }
         }
+    } else if (currentActiveView === "config-imu") {
+        if (tele.heading !== undefined) {
+            const headingEl = document.getElementById("sys-imu-heading");
+            if (headingEl) headingEl.innerText = `${tele.heading.toFixed(1)}°`;
+            const needle = document.getElementById("compass-needle");
+            if (needle) needle.style.transform = `rotate(${tele.heading}deg)`;
+        }
     }
 
-    // Capture scanning tag value dynamically during scan operations
-    if (isScanningRFID && tele.rfid !== "NONE" && tele.rfid !== "") {
-        document.getElementById("tag-uid").value = tele.rfid;
-        document.getElementById("tag-scan-hint").innerText = `Card Detected: ${tele.rfid}`;
-        document.getElementById("tag-scan-hint").style.color = "var(--color-green)";
-        isScanningRFID = false;
+    // ========================================================================
+    // UNIFIED GLOBAL RFID RESOLUTION (Always Active Across All Pages)
+    // ========================================================================
+    const activeRfid = (tele.rfid && tele.rfid !== "NONE") ? tele.rfid.trim() : "";
+    if (activeRfid) {
+        lastKnownScannedRFID = activeRfid;
+    } else if (tele.last_rfid && tele.last_rfid !== "NONE") {
+        lastKnownScannedRFID = tele.last_rfid.trim();
+    }
+
+    const currentDisplayUID = activeRfid || (lastKnownScannedRFID !== "NONE" ? lastKnownScannedRFID : "NONE");
+    
+    // Resolve Friendly Name from backend payload or cached client-side registry
+    let currentDisplayName = "";
+    if (activeRfid) {
+        currentDisplayName = tele.rfid_name || getTagNameFromRegistry(activeRfid);
+    } else if (lastKnownScannedRFID !== "NONE") {
+        currentDisplayName = tele.last_rfid_name || getTagNameFromRegistry(lastKnownScannedRFID);
+    }
+
+    // 1. Update System Configuration (RFID Reader Tab)
+    const sysRfidUid = document.getElementById("sys-rfid-uid");
+    const sysRfidName = document.getElementById("sys-rfid-name");
+    const rfidDot = document.getElementById("rfid-status-dot");
+    const rfidText = document.getElementById("rfid-status-text");
+    const rfidHwDot = document.getElementById("rfid-hw-dot");
+    const rfidHwText = document.getElementById("rfid-hw-text");
+
+    if (sysRfidUid) sysRfidUid.innerText = currentDisplayUID;
+    if (sysRfidName) {
+        if (currentDisplayName) {
+            sysRfidName.innerText = currentDisplayName;
+            sysRfidName.style.color = "var(--color-green)";
+        } else if (currentDisplayUID !== "NONE") {
+            sysRfidName.innerText = "Unregistered Tag";
+            sysRfidName.style.color = "var(--color-yellow)";
+        } else {
+            sysRfidName.innerText = "---";
+            sysRfidName.style.color = "var(--text-muted)";
+        }
+    }
+
+    if (rfidHwDot && rfidHwText) {
+        const isHwOk = (tele.rfid_hw_ok !== undefined) ? tele.rfid_hw_ok : (tele.health && tele.health.rfid === 2);
+        rfidHwDot.className = isHwOk ? "status-dot green" : "status-dot red";
+        rfidHwText.innerText = isHwOk ? "SPI MFRC522: READY" : "SPI MFRC522: NOT DETECTED";
+        rfidHwText.style.color = isHwOk ? "var(--color-green)" : "var(--color-red)";
+    }
+
+    if (rfidDot && rfidText) {
+        if (activeRfid) {
+            rfidDot.className = "status-dot green";
+            rfidText.innerText = `TAG PRESENT (${activeRfid})`;
+            rfidText.style.color = "var(--color-green)";
+        } else if (currentDisplayUID !== "NONE") {
+            rfidDot.className = "status-dot gray";
+            rfidText.innerText = `LAST SCANNED: ${currentDisplayUID}`;
+            rfidText.style.color = "var(--text-muted)";
+        } else {
+            rfidDot.className = "status-dot gray";
+            rfidText.innerText = "NO TAG PRESENT";
+            rfidText.style.color = "var(--text-muted)";
+        }
+    }
+
+    // 2. Update Dashboard RFID Card
+    const dashRfidUid = document.getElementById("dash-rfid-uid");
+    const dashRfidName = document.getElementById("dash-rfid-name");
+    if (dashRfidUid) dashRfidUid.innerText = currentDisplayUID;
+    if (dashRfidName) {
+        if (currentDisplayName) {
+            dashRfidName.innerText = currentDisplayName;
+        } else if (currentDisplayUID !== "NONE") {
+            dashRfidName.innerText = `Tag (${currentDisplayUID})`;
+        } else {
+            dashRfidName.innerText = "No active checkpoint";
+        }
+    }
+
+    // 3. Update Route Management Live Indicator & Modal Hint
+    const routeRfidLive = document.getElementById("route-rfid-live");
+    const routeRfidName = document.getElementById("route-rfid-name");
+    const routeRfidDot = document.getElementById("route-rfid-dot");
+    const modalLiveRfid = document.getElementById("modal-live-rfid");
+    const modalLiveRfidName = document.getElementById("modal-live-rfid-name");
+
+    if (routeRfidLive) routeRfidLive.innerText = currentDisplayUID;
+    if (routeRfidName) routeRfidName.innerText = currentDisplayName ? `(${currentDisplayName})` : "";
+    if (routeRfidDot) routeRfidDot.className = activeRfid ? "status-dot green" : (currentDisplayUID !== "NONE" ? "status-dot blue" : "status-dot gray");
+
+    if (modalLiveRfid) modalLiveRfid.innerText = currentDisplayUID;
+    if (modalLiveRfidName) modalLiveRfidName.innerText = currentDisplayName ? `(${currentDisplayName})` : "";
+
+    // 4. Update Train / Teach Mode Checkpoint Indicator & Status Banner
+    const teachCp = document.getElementById("teach-lbl-checkpoint");
+    if (teachCp) {
+        if (activeRfid) {
+            teachCp.innerText = currentDisplayName ? `${currentDisplayName} (${activeRfid})` : activeRfid;
+        } else if (currentDisplayUID !== "NONE") {
+            teachCp.innerText = currentDisplayName ? `Last: ${currentDisplayName}` : `Last: ${currentDisplayUID}`;
+        } else {
+            teachCp.innerText = "No Tag";
+        }
+    }
+
+    const trainRfidDot = document.getElementById("train-rfid-dot");
+    const trainRfidDisplay = document.getElementById("train-rfid-display");
+    const trainRfidGuide = document.getElementById("train-rfid-step-guide");
+    const isTrainRecording = (tele.mode === "TEACH" && tele.state === "RECORDING");
+
+    if (trainRfidDisplay) {
+        if (activeRfid) {
+            if (trainRfidDot) trainRfidDot.className = "status-dot green";
+            trainRfidDisplay.innerText = currentDisplayName ? `${currentDisplayName} (${activeRfid})` : activeRfid;
+            if (trainRfidGuide) {
+                if (isTrainRecording) {
+                    trainRfidGuide.innerText = "🏁 Tag Detected! Click Stop / Save";
+                    trainRfidGuide.style.color = "#10b981";
+                    trainRfidGuide.style.background = "rgba(16, 185, 129, 0.15)";
+                } else {
+                    trainRfidGuide.innerText = "✅ Ready: Start Tag Detected";
+                    trainRfidGuide.style.color = "#10b981";
+                    trainRfidGuide.style.background = "rgba(16, 185, 129, 0.15)";
+                }
+            }
+            // Auto-fill start input if not recording and input is default or empty
+            const startInput = document.getElementById("teach-route-start");
+            if (startInput && !isTrainRecording && (startInput.value === "START" || !startInput.value)) {
+                startInput.value = currentDisplayName || activeRfid;
+            }
+        } else if (currentDisplayUID !== "NONE") {
+            if (trainRfidDot) trainRfidDot.className = "status-dot blue";
+            trainRfidDisplay.innerText = currentDisplayName ? `Recent: ${currentDisplayName} (${currentDisplayUID})` : `Recent: ${currentDisplayUID}`;
+            if (trainRfidGuide) {
+                if (isTrainRecording) {
+                    trainRfidGuide.innerText = "🏁 Recent Tag! Ready to Save";
+                    trainRfidGuide.style.color = "#38bdf8";
+                    trainRfidGuide.style.background = "rgba(56, 189, 248, 0.15)";
+                } else {
+                    trainRfidGuide.innerText = "✅ Tag detected recently";
+                    trainRfidGuide.style.color = "#38bdf8";
+                    trainRfidGuide.style.background = "rgba(56, 189, 248, 0.15)";
+                }
+            }
+        } else {
+            if (trainRfidDot) trainRfidDot.className = "status-dot gray";
+            trainRfidDisplay.innerText = "No RFID Tag Under AGV";
+            if (trainRfidGuide) {
+                if (isTrainRecording) {
+                    trainRfidGuide.innerText = "🚗 Drive to Destination RFID Tag";
+                    trainRfidGuide.style.color = "#f59e0b";
+                    trainRfidGuide.style.background = "rgba(245, 158, 11, 0.15)";
+                } else {
+                    trainRfidGuide.innerText = "⚠️ Required: Place AGV on Start RFID";
+                    trainRfidGuide.style.color = "#f59e0b";
+                    trainRfidGuide.style.background = "rgba(245, 158, 11, 0.15)";
+                }
+            }
+        }
+    }
+
+    // 5. Update Repeat Mode Active Checkpoint Indicator
+    const repeatCp = document.getElementById("repeat-lbl-active-cp");
+    if (repeatCp) {
+        repeatCp.innerText = activeRfid ? (currentDisplayName || activeRfid) : (currentDisplayUID !== "NONE" ? (currentDisplayName || currentDisplayUID) : "-");
+    }
+
+    // 6. Auto-fill Add RFID Tag Modal when open
+    const modalAdd = document.getElementById("add-tag-modal");
+    const tagUidInput = document.getElementById("tag-uid");
+    if (modalAdd && modalAdd.classList.contains("active") && tagUidInput && currentDisplayUID !== "NONE") {
+        if (!tagUidInput.value || isScanningRFID) {
+            tagUidInput.value = currentDisplayUID;
+            const hint = document.getElementById("tag-scan-hint");
+            if (hint) {
+                hint.innerText = `Card Detected: ${currentDisplayUID}`;
+                hint.style.color = "var(--color-green)";
+            }
+            isScanningRFID = false;
+        }
     }
 }
 
@@ -507,7 +712,8 @@ function initManualControls() {
 
     slider.addEventListener("input", (e) => {
         manualDriveSpeed = e.target.value;
-        speedLabel.innerText = `${manualDriveSpeed}%`;
+        speedLabel.innerText = `${manualDriveSpeed} RPM`;
+        sendSysStatus();
     });
 
     // Touch DPAD event bindings
@@ -685,11 +891,66 @@ function initRouteManager() {
 
     btnOpenCreate.addEventListener("click", () => {
         modalCreate.classList.add("active");
+        const modalRfid = document.getElementById("modal-live-rfid");
+        const modalRfidName = document.getElementById("modal-live-rfid-name");
+        if (modalRfid) modalRfid.innerText = lastKnownScannedRFID;
+        if (modalRfidName) {
+            const name = getTagNameFromRegistry(lastKnownScannedRFID);
+            modalRfidName.innerText = name ? `(${name})` : "";
+        }
     });
 
     btnCloseModal.addEventListener("click", () => {
         modalCreate.classList.remove("active");
     });
+
+    // Quick-use scanned RFID in Create Route modal
+    const btnRouteUseStart = document.getElementById("btn-route-use-start");
+    const btnRouteUseDest = document.getElementById("btn-route-use-dest");
+    if (btnRouteUseStart) {
+        btnRouteUseStart.addEventListener("click", () => {
+            const name = getTagNameFromRegistry(lastKnownScannedRFID);
+            document.getElementById("modal-route-start").value = name || (lastKnownScannedRFID !== "NONE" ? lastKnownScannedRFID : "START");
+        });
+    }
+    if (btnRouteUseDest) {
+        btnRouteUseDest.addEventListener("click", () => {
+            const name = getTagNameFromRegistry(lastKnownScannedRFID);
+            document.getElementById("modal-route-destination").value = name || (lastKnownScannedRFID !== "NONE" ? lastKnownScannedRFID : "OFFICE");
+        });
+    }
+
+    // Quick-use scanned RFID in Teach Mode
+    const btnTeachUseStart = document.getElementById("btn-teach-use-start");
+    const btnTeachUseDest = document.getElementById("btn-teach-use-dest");
+    if (btnTeachUseStart) {
+        btnTeachUseStart.addEventListener("click", () => {
+            const name = getTagNameFromRegistry(lastKnownScannedRFID);
+            document.getElementById("teach-route-start").value = name || (lastKnownScannedRFID !== "NONE" ? lastKnownScannedRFID : "START");
+        });
+    }
+    if (btnTeachUseDest) {
+        btnTeachUseDest.addEventListener("click", () => {
+            const name = getTagNameFromRegistry(lastKnownScannedRFID);
+            document.getElementById("teach-route-destination").value = name || (lastKnownScannedRFID !== "NONE" ? lastKnownScannedRFID : "OFFICE");
+        });
+    }
+
+    // Quick-use scanned RFID in Repeat Mode
+    const btnRepeatUseStart = document.getElementById("btn-repeat-use-start");
+    const btnRepeatUseDest = document.getElementById("btn-repeat-use-dest");
+    if (btnRepeatUseStart) {
+        btnRepeatUseStart.addEventListener("click", () => {
+            const name = getTagNameFromRegistry(lastKnownScannedRFID);
+            document.getElementById("repeat-start-rfid").value = name || (lastKnownScannedRFID !== "NONE" ? lastKnownScannedRFID : "START");
+        });
+    }
+    if (btnRepeatUseDest) {
+        btnRepeatUseDest.addEventListener("click", () => {
+            const name = getTagNameFromRegistry(lastKnownScannedRFID);
+            document.getElementById("repeat-dest-rfid").value = name || (lastKnownScannedRFID !== "NONE" ? lastKnownScannedRFID : "LAB");
+        });
+    }
 
     btnModalTeach.addEventListener("click", () => {
         const name = document.getElementById("modal-route-name").value;
@@ -713,53 +974,82 @@ function initRouteManager() {
             if (data.status === "success") {
                 modalCreate.classList.remove("active");
                 
-                // Copy settings to Teach mode view inputs
+                // Copy settings to Train mode view inputs
                 document.getElementById("teach-route-name").value = name;
                 document.getElementById("teach-route-start").value = start;
                 document.getElementById("teach-route-destination").value = dest;
                 
-                // Direct the user to the Teach view tab
+                // Direct the user to the Train view tab
                 switchView("teach");
             } else {
-                alert("Failed: " + data.message);
+                alert("⚠️ CANNOT START TRAIN MODE:\n\n" + data.message + "\n\nPlease place the AGV over an RFID tag first.");
             }
         })
         .catch(err => alert("Connection error: " + err));
     });
 
-    // Teach Mode Screen Command Controls
-    document.getElementById("btn-teach-start").addEventListener("click", () => {
-        const name = document.getElementById("teach-route-name").value;
-        const start = document.getElementById("teach-route-start").value;
-        const dest = document.getElementById("teach-route-destination").value;
+    // Train Mode Screen Command Controls
+    const btnTeachStart = document.getElementById("btn-teach-start");
+    const btnTeachStop = document.getElementById("btn-teach-stop");
+    const btnTeachSave = document.getElementById("btn-teach-save");
+    const btnTeachCancel = document.getElementById("btn-teach-cancel");
 
-        fetch(`${apiUrl}/api/teach/start`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: name, start: start, destination: dest, description: "" })
+    if (btnTeachStart) {
+        btnTeachStart.addEventListener("click", () => {
+            const name = document.getElementById("teach-route-name").value || "Trained Route";
+            const start = document.getElementById("teach-route-start").value || "";
+            const dest = document.getElementById("teach-route-destination").value || "";
+
+            fetch(`${apiUrl}/api/teach/start`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: name, start: start, destination: dest, description: "" })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === "success") {
+                    console.log("Train Mode started:", data.message);
+                } else {
+                    // Show error message if start rejected (e.g. no RFID tag)
+                    alert("⚠️ CANNOT START TRAIN MODE:\n\n" + data.message + "\n\nPlease place the AGV directly over an RFID tag to start.");
+                }
+            })
+            .catch(err => alert("Connection error: " + err));
         });
-    });
+    }
 
-    document.getElementById("btn-teach-stop").addEventListener("click", () => {
+    function handleStopTrainMode() {
         fetch(`${apiUrl}/api/teach/stop`, { method: "POST" })
         .then(res => res.json())
         .then(data => {
             if (data.status === "success") {
-                alert("Route saved successfully!");
+                alert("✅ TRAIN MODE COMPLETE!\n\n" + data.message);
                 switchView("routes");
+                loadRoutesList();
             } else {
-                alert("Error: " + data.message);
+                // REQUIRED: If destination RFID not scanned, do NOT allow to end and show message to user!
+                alert("⚠️ CANNOT END TRAIN MODE:\n\n" + data.message + "\n\nYou must scan an RFID tag at the destination before ending the route.");
+            }
+        })
+        .catch(err => alert("Connection error: " + err));
+    }
+
+    if (btnTeachStop) {
+        btnTeachStop.addEventListener("click", handleStopTrainMode);
+    }
+    if (btnTeachSave) {
+        btnTeachSave.addEventListener("click", handleStopTrainMode);
+    }
+
+    if (btnTeachCancel) {
+        btnTeachCancel.addEventListener("click", () => {
+            if (confirm("Are you sure you want to cancel Train Mode? Paths will be discarded.")) {
+                fetch(`${apiUrl}/api/teach/cancel`, { method: "POST" });
+                fetch(`${apiUrl}/api/manual/stop`, { method: "POST" });
+                switchView("routes");
             }
         });
-    });
-
-    document.getElementById("btn-teach-cancel").addEventListener("click", () => {
-        if (confirm("Are you sure you want to cancel recording? Paths will be discarded.")) {
-            // Trigger teleoperation cancel (or we just stop manual driving)
-            fetch(`${apiUrl}/api/manual/stop`, { method: "POST" });
-            switchView("routes");
-        }
-    });
+    }
 }
 
 function loadRoutesList() {
@@ -970,11 +1260,16 @@ function initRFIDManager() {
 
     btnOpenAdd.addEventListener("click", () => {
         modalAdd.classList.add("active");
-        document.getElementById("tag-uid").value = "";
+        document.getElementById("tag-uid").value = (lastKnownScannedRFID !== "NONE") ? lastKnownScannedRFID : "";
         document.getElementById("tag-name").value = "";
         document.getElementById("tag-location").value = "";
-        document.getElementById("tag-scan-hint").innerText = "Click Scan and approach the physical reader.";
-        document.getElementById("tag-scan-hint").style.color = "var(--text-muted)";
+        if (lastKnownScannedRFID !== "NONE") {
+            document.getElementById("tag-scan-hint").innerText = `Pre-filled with last scanned card: ${lastKnownScannedRFID}`;
+            document.getElementById("tag-scan-hint").style.color = "var(--color-green)";
+        } else {
+            document.getElementById("tag-scan-hint").innerText = "Click Scan or place card on reader.";
+            document.getElementById("tag-scan-hint").style.color = "var(--text-muted)";
+        }
     });
 
     btnClose.addEventListener("click", () => {
@@ -991,9 +1286,9 @@ function initRFIDManager() {
     });
 
     btnSave.addEventListener("click", () => {
-        const uid = document.getElementById("tag-uid").value;
-        const name = document.getElementById("tag-name").value;
-        const loc = document.getElementById("tag-location").value;
+        const uid = document.getElementById("tag-uid").value.trim();
+        const name = document.getElementById("tag-name").value.trim();
+        const loc = document.getElementById("tag-location").value.trim();
 
         if (!uid || !name) {
             alert("Card UID and Friendly Name are required.");
@@ -1009,45 +1304,77 @@ function initRFIDManager() {
         .then(data => {
             if (data.status === "success") {
                 modalAdd.classList.remove("active");
+                showToast(`Tag ${name} (${uid}) registered successfully!`, "success");
                 loadRFIDList();
             } else {
                 alert("Error: " + data.message);
             }
         });
     });
+
+    // System Config RFID Tab Quick Register Button
+    const btnSysRegister = document.getElementById("btn-sys-register-rfid");
+    if (btnSysRegister) {
+        btnSysRegister.addEventListener("click", () => {
+            switchView("rfid");
+            modalAdd.classList.add("active");
+            if (lastKnownScannedRFID && lastKnownScannedRFID !== "NONE") {
+                document.getElementById("tag-uid").value = lastKnownScannedRFID;
+                document.getElementById("tag-scan-hint").innerText = `Pre-filled with last scanned card: ${lastKnownScannedRFID}`;
+                document.getElementById("tag-scan-hint").style.color = "var(--color-green)";
+            }
+        });
+    }
+
+    // System Config RFID Tab Diagnostics Button
+    const btnSysTest = document.getElementById("btn-sys-test-rfid");
+    if (btnSysTest) {
+        btnSysTest.addEventListener("click", () => {
+            showToast("Querying RFID reader diagnostics...", "info");
+            fetch(`${apiUrl}/api/rfid/scan`, { method: "POST" })
+                .then(() => showToast("RFID Reader scan active. Open Serial Monitor for diagnostics.", "info"));
+        });
+    }
+
+    // Initial load of RFID tags on startup
+    loadRFIDList();
 }
 
 function loadRFIDList() {
     const tableBody = document.querySelector("#rfid-table tbody");
-    tableBody.innerHTML = `<tr><td colspan="5" class="text-center placeholder-text">Loading RFID mappings...</td></tr>`;
+    if (tableBody) tableBody.innerHTML = `<tr><td colspan="5" class="text-center placeholder-text">Loading RFID mappings...</td></tr>`;
 
     fetch(`${apiUrl}/api/rfid`)
     .then(res => res.json())
     .then(data => {
-        tableBody.innerHTML = "";
         const tags = data.tags || [];
+        registeredRFIDTags = tags;
+        window.registeredRFIDTags = tags;
 
-        if (tags.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="5" class="text-center placeholder-text">No registered RFID tags. Click add tag to register checkpoints!</td></tr>`;
-            return;
+        if (tableBody) {
+            tableBody.innerHTML = "";
+            if (tags.length === 0) {
+                tableBody.innerHTML = `<tr><td colspan="5" class="text-center placeholder-text">No registered RFID tags. Click add tag to register checkpoints!</td></tr>`;
+                return;
+            }
+
+            tags.forEach(tag => {
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td><b class="monospace">${tag.uid}</b></td>
+                    <td><span class="state-label green">${tag.name}</span></td>
+                    <td>${tag.location || "N/A"}</td>
+                    <td><span class="state-label green">ACTIVE</span></td>
+                    <td class="table-actions">
+                        <button class="btn btn-outline btn-sm text-red" onclick="deleteRFIDTag('${tag.uid}')">DELETE</button>
+                    </td>
+                `;
+                tableBody.appendChild(tr);
+            });
         }
-
-        tags.forEach(tag => {
-            const tr = document.createElement("tr");
-            tr.innerHTML = `
-                <td><b class="monospace">${tag.uid}</b></td>
-                <td><span class="state-label green">${tag.name}</span></td>
-                <td>${tag.location || "N/A"}</td>
-                <td><span class="state-label green">ACTIVE</span></td>
-                <td class="table-actions">
-                    <button class="btn btn-outline btn-sm text-red" onclick="deleteRFIDTag('${tag.uid}')">DELETE</button>
-                </td>
-            `;
-            tableBody.appendChild(tr);
-        });
     })
     .catch(err => {
-        tableBody.innerHTML = `<tr><td colspan="5" class="text-center text-red">Failed to communicate with API.</td></tr>`;
+        if (tableBody) tableBody.innerHTML = `<tr><td colspan="5" class="text-center text-red">Failed to communicate with API.</td></tr>`;
     });
 }
 
@@ -1062,6 +1389,8 @@ function deleteRFIDTag(uid) {
     }
 }
 window.deleteRFIDTag = deleteRFIDTag;
+isScanningRFID = false;
+let lastSeenRFID = "NONE";
 
 /* ============================================================================
    DAILY ERROR LOG
@@ -1144,64 +1473,74 @@ function loadSettingsFromServer() {
     fetch(`${apiUrl}/api/settings`)
     .then(res => res.json())
     .then(settings => {
-        document.getElementById("set-test-profile").value = settings.test_profile;
+        let s = settings;
+        document.getElementById("set-test-profile").value = s.test_profile;
 
-        document.getElementById("set-feat-dashboard").checked = settings.enable_dashboard;
-        document.getElementById("set-feat-teach").checked = settings.enable_teach_mode;
-        document.getElementById("set-feat-repeat").checked = settings.enable_repeat_mode;
-        document.getElementById("set-feat-manual").checked = settings.enable_manual_control;
-        document.getElementById("set-feat-routes").checked = settings.enable_route_manager;
-        document.getElementById("set-feat-rfid").checked = settings.enable_rfid_manager;
-        document.getElementById("set-feat-errors").checked = settings.enable_error_log;
-        document.getElementById("set-feat-system").checked = settings.enable_system_info;
+        document.getElementById("set-feat-dashboard").checked = s.enable_dashboard;
+        document.getElementById("set-feat-teach").checked = s.enable_teach_mode;
+        document.getElementById("set-feat-repeat").checked = s.enable_repeat_mode;
+        document.getElementById("set-feat-manual").checked = s.enable_manual_control;
+        document.getElementById("set-feat-routes").checked = s.enable_route_manager;
+        document.getElementById("set-feat-rfid").checked = s.enable_rfid_manager;
+        document.getElementById("set-feat-errors").checked = s.enable_error_log;
+        document.getElementById("set-feat-system").checked = s.enable_system_info;
 
-        document.getElementById("set-comm-uart").checked = settings.enable_stm32_uart;
-        document.getElementById("set-comm-ws").checked = settings.enable_websocket;
+        document.getElementById("set-comm-uart").checked = s.enable_stm32_uart;
+        document.getElementById("set-comm-ws").checked = s.enable_websocket;
 
-        document.getElementById("set-mot-control").checked = settings.enable_motor_control;
-        document.getElementById("set-mot-encoder").checked = settings.enable_encoder;
-        document.getElementById("set-mot-mpu").checked = settings.enable_mpu6050;
-        document.getElementById("set-mot-pid").checked = settings.enable_pid;
+        document.getElementById("set-mot-control").checked = s.enable_motor_control;
+        document.getElementById("set-mot-encoder").checked = s.enable_encoder;
+        document.getElementById("set-mot-mpu").checked = s.enable_mpu6050;
+        document.getElementById("set-mot-pid").checked = s.enable_pid;
 
-        document.getElementById("set-trim-l-fwd").value = settings.motor_l_fwd_scale;
-        document.getElementById("set-trim-r-fwd").value = settings.motor_r_fwd_scale;
-        document.getElementById("set-trim-l-turn").value = settings.motor_l_turn_scale;
-        document.getElementById("set-trim-r-turn").value = settings.motor_r_turn_scale;
+        document.getElementById("set-trim-l-fwd").value = s.motor_l_fwd_scale;
+        document.getElementById("set-trim-r-fwd").value = s.motor_r_fwd_scale;
+        document.getElementById("set-trim-l-turn").value = s.motor_l_turn_scale;
+        document.getElementById("set-trim-r-turn").value = s.motor_r_turn_scale;
 
-        document.getElementById("lbl-trim-l-fwd").innerText = settings.motor_l_fwd_scale;
-        document.getElementById("lbl-trim-r-fwd").innerText = settings.motor_r_fwd_scale;
-        document.getElementById("lbl-trim-l-turn").innerText = settings.motor_l_turn_scale;
-        document.getElementById("lbl-trim-r-turn").innerText = settings.motor_r_turn_scale;
+        document.getElementById("lbl-trim-l-fwd").innerText = s.motor_l_fwd_scale;
+        document.getElementById("lbl-trim-r-fwd").innerText = s.motor_r_fwd_scale;
+        document.getElementById("lbl-trim-l-turn").innerText = s.motor_l_turn_scale;
+        document.getElementById("lbl-trim-r-turn").innerText = s.motor_r_turn_scale;
 
-        document.getElementById("set-rfid-reader").checked = settings.rfid_reader;
-        document.getElementById("set-rfid-mgr").checked = settings.rfid_manager_flag;
-        document.getElementById("set-rfid-cps").checked = settings.rfid_checkpoints;
+        document.getElementById("set-rfid-reader").checked = s.rfid_reader;
+        document.getElementById("set-rfid-mgr").checked = s.rfid_manager_flag;
+        document.getElementById("set-rfid-cps").checked = s.rfid_checkpoints;
 
-        document.getElementById("set-tof-sensors").checked = settings.tof_sensors;
-        document.getElementById("set-tof-obstacle").checked = settings.obstacle_detection;
+        document.getElementById("set-tof-sensors").checked = s.tof_sensors;
+        document.getElementById("set-tof-obstacle").checked = s.obstacle_detection;
 
-        document.getElementById("set-bat-mon").checked = settings.battery_monitoring;
-        document.getElementById("set-bat-ina").checked = settings.ina219;
-        document.getElementById("set-bat-volt").checked = settings.voltage_monitoring;
-        document.getElementById("set-bat-curr").checked = settings.current_monitoring;
-        document.getElementById("set-bat-power").checked = settings.power_monitoring;
-        document.getElementById("set-bat-pct").checked = settings.battery_percentage;
-        document.getElementById("set-bat-low").checked = settings.low_battery_warning;
-        document.getElementById("set-bat-crit").checked = settings.critical_battery_warning;
-        document.getElementById("set-bat-fault").checked = settings.battery_fault_detection;
-        document.getElementById("set-bat-charge").checked = settings.charging_status;
+        document.getElementById("set-bat-mon").checked = s.battery_monitoring;
+        document.getElementById("set-bat-ina").checked = s.ina219;
+        document.getElementById("set-bat-volt").checked = s.voltage_monitoring;
+        document.getElementById("set-bat-curr").checked = s.current_monitoring;
+        document.getElementById("set-bat-power").checked = s.power_monitoring;
+        document.getElementById("set-bat-pct").checked = s.battery_percentage;
+        document.getElementById("set-bat-low").checked = s.low_battery_warning;
+        document.getElementById("set-bat-crit").checked = s.critical_battery_warning;
+        document.getElementById("set-bat-fault").checked = s.battery_fault_detection;
+        document.getElementById("set-bat-charge").checked = s.charging_status;
 
-        document.getElementById("set-thresh-low-v").value = settings.low_voltage;
-        document.getElementById("set-thresh-crit-v").value = settings.critical_voltage;
-        document.getElementById("set-thresh-low-pct").value = settings.low_battery_pct;
-        document.getElementById("set-thresh-crit-pct").value = settings.critical_battery_pct;
+        document.getElementById("set-thresh-low-v").value = s.low_voltage;
+        document.getElementById("set-thresh-crit-v").value = s.critical_voltage;
+        document.getElementById("set-thresh-low-pct").value = s.low_battery_pct;
+        document.getElementById("set-thresh-crit-pct").value = s.critical_battery_pct;
 
-        document.getElementById("set-wifi-ssid").value = settings.wifi_ssid || "TARSLIFT_AGV";
-        document.getElementById("set-wifi-pass").value = settings.wifi_password || "12345678";
-        document.getElementById("set-sys-demo").checked = settings.demo_mode;
+        document.getElementById("set-wifi-ssid").value = s.wifi_ssid || "TARSLIFT_AGV";
+        document.getElementById("set-wifi-pass").value = s.wifi_password || "12345678";
+        
+        document.getElementById("set-pid-kp-l").value = s.pid_kp_l !== undefined ? s.pid_kp_l.toFixed(2) : "1.00";
+        document.getElementById("set-pid-ki-l").value = s.pid_ki_l !== undefined ? s.pid_ki_l.toFixed(2) : "0.00";
+        document.getElementById("set-pid-kd-l").value = s.pid_kd_l !== undefined ? s.pid_kd_l.toFixed(2) : "0.00";
+        document.getElementById("set-pid-kp-r").value = s.pid_kp_r !== undefined ? s.pid_kp_r.toFixed(2) : "1.00";
+        document.getElementById("set-pid-ki-r").value = s.pid_ki_r !== undefined ? s.pid_ki_r.toFixed(2) : "0.00";
+        document.getElementById("set-pid-kd-r").value = s.pid_kd_r !== undefined ? s.pid_kd_r.toFixed(2) : "0.00";
+        
+        if (s.enable_pid !== undefined) document.getElementById("set-pid-enable").checked = s.enable_pid;
+        document.getElementById("set-sys-demo").checked = s.demo_mode;
 
         applyUIDependencyRules();
-        updateSidebarMenuVisibilities(settings);
+        updateSidebarMenuVisibilities(s);
     })
     .catch(err => console.error("Failed to load settings", err));
 }
@@ -2287,6 +2626,22 @@ function initPIDTuneManager() {
     bindSliderLabel("set-trim-r-fwd", "lbl-trim-r-fwd");
     bindSliderLabel("set-trim-l-turn", "lbl-trim-l-turn");
     bindSliderLabel("set-trim-r-turn", "lbl-trim-r-turn");
+    bindSliderLabel("set-target-rpm", "lbl-target-rpm");
+    
+    const targetRpmSlider = document.getElementById("set-target-rpm");
+    if (targetRpmSlider) {
+        targetRpmSlider.addEventListener("change", (e) => {
+            const rpm = parseFloat(e.target.value);
+            if (wsConn && wsConn.readyState === WebSocket.OPEN) {
+                wsConn.send(JSON.stringify({ type: "update_target_rpm", data: { rpm: rpm } }));
+                showToast("Target RPM set to " + rpm, "info");
+                
+                // Update PID chart targets immediately
+                if (window.pidDataLeft) window.pidDataLeft.target.fill(rpm);
+                if (window.pidDataRight) window.pidDataRight.target.fill(rpm);
+            }
+        });
+    }
 
     // PID realtime WebSocket broadcast
     let pidState = {
@@ -2303,7 +2658,6 @@ function initPIDTuneManager() {
             pidState.right.kp = settings.pid_kp_r;
             pidState.right.ki = settings.pid_ki_r;
             pidState.right.kd = settings.pid_kd_r;
-            updatePIDUIInputs();
         }
     });
 
@@ -2315,16 +2669,6 @@ function initPIDTuneManager() {
     const inpKdR = document.getElementById("set-pid-kd-r");
     const btnApplyLive = document.getElementById("btn-pid-apply-live");
     
-    const updatePIDUIInputs = () => {
-        if(!inpKpL) return;
-        inpKpL.value = pidState.left.kp;
-        inpKiL.value = pidState.left.ki;
-        inpKdL.value = pidState.left.kd;
-        inpKpR.value = pidState.right.kp;
-        inpKiR.value = pidState.right.ki;
-        inpKdR.value = pidState.right.kd;
-    };
-    
     const readInputsIntoState = () => {
         if(!inpKpL) return;
         pidState.left.kp = parseFloat(inpKpL.value) || 0;
@@ -2334,13 +2678,6 @@ function initPIDTuneManager() {
         pidState.right.ki = parseFloat(inpKiR.value) || 0;
         pidState.right.kd = parseFloat(inpKdR.value) || 0;
     };
-
-    if (inpKpL) inpKpL.addEventListener("input", readInputsIntoState);
-    if (inpKiL) inpKiL.addEventListener("input", readInputsIntoState);
-    if (inpKdL) inpKdL.addEventListener("input", readInputsIntoState);
-    if (inpKpR) inpKpR.addEventListener("input", readInputsIntoState);
-    if (inpKiR) inpKiR.addEventListener("input", readInputsIntoState);
-    if (inpKdR) inpKdR.addEventListener("input", readInputsIntoState);
 
     const sendPidTuning = () => {
         if (!wsConn || wsConn.readyState !== WebSocket.OPEN) return;
@@ -2372,7 +2709,8 @@ function initPIDTuneManager() {
                     labels: Array(50).fill(''),
                     datasets: [
                         { label: 'Target RPM', borderColor: 'rgba(239, 68, 68, 1)', data: Array(50).fill(0), fill: false, pointRadius: 0, tension: 0.1, borderWidth: 2 },
-                        { label: 'Actual RPM', borderColor: 'rgba(59, 130, 246, 1)', data: Array(50).fill(0), fill: false, pointRadius: 0, tension: 0.1, borderWidth: 2 }
+                        { label: 'Actual RPM', borderColor: 'rgba(59, 130, 246, 1)', data: Array(50).fill(0), fill: false, pointRadius: 0, tension: 0.1, borderWidth: 2 },
+                        { label: '0 Axis', borderColor: 'rgba(234, 179, 8, 0.5)', data: Array(50).fill(0), fill: false, pointRadius: 0, tension: 0, borderWidth: 1, borderDash: [5, 5] }
                     ]
                 },
                 options: {
@@ -2417,6 +2755,7 @@ function initPIDTuneManager() {
     const saveBtn = document.getElementById("btn-pid-save");
     if(saveBtn) {
         saveBtn.addEventListener("click", () => {
+            readInputsIntoState();
             const body = {
                 pid_kp_l: pidState.left.kp,
                 pid_ki_l: pidState.left.ki,
@@ -2424,6 +2763,7 @@ function initPIDTuneManager() {
                 pid_kp_r: pidState.right.kp,
                 pid_ki_r: pidState.right.ki,
                 pid_kd_r: pidState.right.kd,
+                enable_pid: document.getElementById("set-pid-enable").checked,
                 enc_ppr_l: parseInt(document.getElementById("set-enc-ppr-l").value),
                 enc_ppr_r: parseInt(document.getElementById("set-enc-ppr-r").value),
                 wheel_circ_mm: parseFloat(document.getElementById("set-wheel-circ").value),
@@ -2515,14 +2855,14 @@ function initPIDTuneManager() {
     if (navSaveBtn) {
         navSaveBtn.addEventListener("click", () => {
             const method = parseInt(document.getElementById("set-drive-method").value);
-            const lookahead = parseFloat(document.getElementById("set-lookahead").value);
             
             fetch(`${apiUrl}/api/settings`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ 
                     drive_method: method,
-                    lookahead_distance: lookahead
+                    lookahead_distance: parseFloat(document.getElementById("set-lookahead").value) || 300,
+                    enable_pid: document.getElementById("set-pid-enable").checked
                 })
             })
             .then(res => res.json())
@@ -2564,18 +2904,22 @@ function initPIDTuneManager() {
     const btnPprStart = document.getElementById("btn-ppr-start");
     const btnPprStop = document.getElementById("btn-ppr-stop");
     const btnPprApply = document.getElementById("btn-ppr-apply");
+    const btnPprReset = document.getElementById("btn-ppr-reset");
 
     if (btnPprStart) {
         btnPprStart.addEventListener("click", () => {
             isPPRMeasuring = true;
+            window.isPPRMeasuring = true;
             calibSide = document.getElementById("calib-ppr-side").value;
             startRaw = calibSide === "left" ? (window.latestRawEncL || 0) : (window.latestRawEncR || 0);
+            window.pprStartRaw = startRaw;
             
             document.getElementById("sys-calib-ppr-result").innerText = "Measuring...";
             
             btnPprStart.style.display = "none";
             btnPprStop.style.display = "flex";
             btnPprApply.style.display = "none";
+            if (btnPprReset) btnPprReset.style.display = "none";
             showToast("Measurement started. Manually rotate the " + calibSide + " wheel now.", "info");
         });
     }
@@ -2583,6 +2927,7 @@ function initPIDTuneManager() {
     if (btnPprStop) {
         btnPprStop.addEventListener("click", () => {
             isPPRMeasuring = false;
+            window.isPPRMeasuring = false;
             const endRaw = calibSide === "left" ? (window.latestRawEncL || 0) : (window.latestRawEncR || 0);
             const cycles = parseFloat(document.getElementById("calib-ppr-cycles").value) || 1;
             
@@ -2594,7 +2939,22 @@ function initPIDTuneManager() {
             btnPprStart.innerText = "RESTART MEASUREMENT";
             btnPprStop.style.display = "none";
             btnPprApply.style.display = "flex";
+            if (btnPprReset) btnPprReset.style.display = "flex";
             showToast("Measurement complete!", "success");
+        });
+    }
+
+    if (btnPprReset) {
+        btnPprReset.addEventListener("click", () => {
+            isPPRMeasuring = false;
+            calibPPR = 0;
+            document.getElementById("sys-calib-ppr-result").innerText = "---";
+            btnPprStart.style.display = "flex";
+            btnPprStart.innerText = "START MEASUREMENT";
+            btnPprStop.style.display = "none";
+            btnPprApply.style.display = "none";
+            btnPprReset.style.display = "none";
+            showToast("Calibration reset.", "info");
         });
     }
 

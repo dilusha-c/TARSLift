@@ -1,3 +1,8 @@
+C:\Users\hp\.platformio\penv\Scripts\pio run -t uploadfs
+
+
+
+
 # TARSLIFT AGV - ESP32-S3 Web Dashboard & Firmware
 
 TARSLIFT AGV is a standalone high-level control system and dashboard web server hosted directly on an ESP32-S3 microcontroller. A web client (PC, phone, tablet) connects to the ESP32 via Wi-Fi and retrieves telemetry data via WebSocket or sends REST API requests.

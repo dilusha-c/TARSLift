@@ -30,6 +30,9 @@ extern "C" {
 #define AGV_CMD_SET_MOTOR_TRIM    0x14
 #define AGV_CMD_SET_PID_TUNING    0x15
 #define AGV_CMD_SET_ENCODER_CONFIG 0x16
+#define AGV_CMD_SET_PID_ENABLE    0x17
+#define AGV_CMD_SET_SPEEDS        0x19
+#define AGV_CMD_CALIBRATE_IMU     0x1A
 
 #define AGV_CMD_TEACH_START       0x20
 #define AGV_CMD_TEACH_STOP        0x21
@@ -38,6 +41,7 @@ extern "C" {
 #define AGV_CMD_IMU_DATA          0x31
 #define AGV_CMD_ENCODER_DATA      0x32
 #define AGV_CMD_TOF_DATA          0x33
+#define AGV_CMD_TELEMETRY_SYNC    0x34
 #define AGV_CMD_MOTOR_STATUS      0x60
 
 #define AGV_CMD_SEGMENT_START     0x50
@@ -117,19 +121,25 @@ uint16_t agv_build_odometry(int32_t left_mm, int32_t right_mm, int16_t yaw_deg_x
 uint16_t agv_build_encoder_data(int32_t left_pulses, int32_t right_pulses, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
 uint16_t agv_build_imu_data(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16_t gz, int16_t yaw_deg_x10, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
 uint16_t agv_build_tof_data(uint16_t left_mm, uint16_t center_mm, uint16_t right_mm, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
+uint16_t agv_build_telemetry_sync(int32_t odom_l, int32_t odom_r, int32_t enc_l, int32_t enc_r, uint16_t tof_l, uint16_t tof_c, uint16_t tof_r, int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16_t gz, int16_t yaw_x10, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
 uint16_t agv_build_motor_status(int16_t left_pwm, int16_t right_pwm, int8_t left_dir, int8_t right_dir, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
-uint16_t agv_build_move_done(uint8_t orig_seq, uint8_t result, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
+uint16_t agv_build_set_motor_trim(uint8_t l_fwd, uint8_t r_fwd, uint8_t l_turn, uint8_t r_turn, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
+uint16_t agv_build_set_pid_tuning(float kpL, float kiL, float kdL, float kpR, float kiR, float kdR, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
+uint16_t agv_build_set_pid_enable(bool enabled, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
+uint16_t agv_build_set_encoder_config(float wheel_circ, uint16_t ppr_l, uint16_t ppr_r, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
 uint16_t agv_build_turn_done(uint8_t orig_seq, uint8_t result, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
 
 /* Motion Command Payload Parsers (For STM32 to decode incoming ESP32 packets) */
 bool agv_parse_move(const agv_packet_t *pkt, int32_t *distance_mm, uint16_t *speed_mm_s);
 bool agv_parse_turn(const agv_packet_t *pkt, int16_t *angle_deg_x10, uint16_t *speed_deg_s);
 bool agv_parse_set_repeat_speed(const agv_packet_t *pkt, uint16_t *speed_percent);
+bool agv_parse_set_speeds(const agv_packet_t *pkt, int16_t *leftSpeedMmS, int16_t *rightSpeedMmS);
 bool agv_parse_motor_trim(const agv_packet_t *pkt, uint8_t *lFwd, uint8_t *rFwd, uint8_t *lTurn, uint8_t *rTurn);
 bool agv_parse_segment_start(const agv_packet_t *pkt, uint16_t *segment_id, uint16_t *src_rfid_id, uint16_t *dst_rfid_id);
-bool agv_parse_segment_complete(const agv_packet_t *pkt, uint16_t *segment_id);
+bool agv_parse_set_motor_trim(const agv_packet_t *pkt, uint8_t *l_fwd, uint8_t *r_fwd, uint8_t *l_turn, uint8_t *r_turn);
 bool agv_parse_set_pid_tuning(const agv_packet_t *pkt, float *kpL, float *kiL, float *kdL, float *kpR, float *kiR, float *kdR);
-bool agv_parse_set_encoder_config(const agv_packet_t *pkt, float *wheel_circ_mm, uint16_t *ppr_l, uint16_t *ppr_r);
+bool agv_parse_set_pid_enable(const agv_packet_t *pkt, bool *enabled);
+bool agv_parse_set_encoder_config(const agv_packet_t *pkt, float *wheel_circ, uint16_t *ppr_l, uint16_t *ppr_r);
 bool agv_parse_tof_data(const agv_packet_t *pkt, uint16_t *left_mm, uint16_t *center_mm, uint16_t *right_mm);
 
 #ifdef __cplusplus

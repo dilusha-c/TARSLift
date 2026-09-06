@@ -22,9 +22,10 @@ namespace AGVCommand
     constexpr uint8_t SET_MOTOR_TRIM   = 0x14;
     constexpr uint8_t SET_PID_TUNING   = 0x15;
     constexpr uint8_t SET_ENCODER_CONFIG = 0x16;
-    constexpr uint8_t CALIBRATE_IMU    = 0x17;
+    constexpr uint8_t SET_PID_ENABLE   = 0x17;
     constexpr uint8_t SET_TOF_CONFIG   = 0x18;
     constexpr uint8_t SET_SPEEDS       = 0x19;
+    constexpr uint8_t CALIBRATE_IMU    = 0x1A;
 
     // Teach / Repeat
     constexpr uint8_t TEACH_START      = 0x20;
@@ -46,6 +47,7 @@ namespace AGVCommand
     constexpr uint8_t IMU_DATA         = 0x31;
     constexpr uint8_t ENCODER_DATA     = 0x32;
     constexpr uint8_t TOF_DATA         = 0x33;
+    constexpr uint8_t TELEMETRY_SYNC   = 0x34;
     constexpr uint8_t MOTOR_STATUS     = 0x60;
 
     // Command completion

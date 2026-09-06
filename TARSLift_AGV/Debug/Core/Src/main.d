@@ -26,7 +26,7 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim_ex.h \
  ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_uart.h \
  F:/Projects/AGV/TARSLift_AGV/AGV_Communication/agv_stm32_c.h \
- ../Core/Inc/motor.h ../Core/Inc/main.h ../Core/Inc/mpu6050_lite.h \
+ ../Core/Inc/motor.h ../Core/Inc/main.h ../Core/Inc/mpu6050.h \
  ../Core/Inc/vl53l0x.h
 ../Core/Inc/main.h:
 ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal.h:
@@ -58,5 +58,5 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 F:/Projects/AGV/TARSLift_AGV/AGV_Communication/agv_stm32_c.h:
 ../Core/Inc/motor.h:
 ../Core/Inc/main.h:
-../Core/Inc/mpu6050_lite.h:
+../Core/Inc/mpu6050.h:
 ../Core/Inc/vl53l0x.h:

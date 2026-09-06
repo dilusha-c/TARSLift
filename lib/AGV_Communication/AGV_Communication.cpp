@@ -309,6 +309,18 @@ bool AGV_Communication::setPidTuning(float kpL, float kiL, float kdL, float kpR,
     return makeCommand(AGVCommand::SET_PID_TUNING, payload, 24, packet);
 }
 
+bool AGV_Communication::setPidEnable(
+    bool enabled,
+    AGVPacket& packet
+)
+{
+    packet.cmd    = AGVCommand::SET_PID_ENABLE;
+    packet.length = 1;
+    packet.payload[0] = enabled ? 1 : 0;
+    return true;
+}
+
+
 bool AGV_Communication::setEncoderConfig(float wheelCircMm, uint16_t pprL, uint16_t pprR, AGVPacket& packet) {
     uint8_t payload[8];
     memcpy(&payload[0], &wheelCircMm, 4);
@@ -695,6 +707,34 @@ bool AGV_Communication::parseTofData(const AGVPacket& packet, uint16_t& leftMm, 
     leftMm = static_cast<uint16_t>(packet.payload[0] | (packet.payload[1] << 8));
     centerMm = static_cast<uint16_t>(packet.payload[2] | (packet.payload[3] << 8));
     rightMm = static_cast<uint16_t>(packet.payload[4] | (packet.payload[5] << 8));
+    return true;
+}
+
+bool AGV_Communication::parseTelemetrySync(const AGVPacket& packet, int32_t& odom_l, int32_t& odom_r, int32_t& enc_l, int32_t& enc_r, uint16_t& tof_l, uint16_t& tof_c, uint16_t& tof_r, int16_t& ax, int16_t& ay, int16_t& az, int16_t& gx, int16_t& gy, int16_t& gz, int16_t& yaw_x10) {
+    if (packet.cmd != AGVCommand::TELEMETRY_SYNC || packet.length < 38) return false;
+    
+    // Odometry
+    odom_l = static_cast<int32_t>(packet.payload[0] | (packet.payload[1] << 8) | (packet.payload[2] << 16) | (packet.payload[3] << 24));
+    odom_r = static_cast<int32_t>(packet.payload[4] | (packet.payload[5] << 8) | (packet.payload[6] << 16) | (packet.payload[7] << 24));
+    
+    // Encoders
+    enc_l = static_cast<int32_t>(packet.payload[8] | (packet.payload[9] << 8) | (packet.payload[10] << 16) | (packet.payload[11] << 24));
+    enc_r = static_cast<int32_t>(packet.payload[12] | (packet.payload[13] << 8) | (packet.payload[14] << 16) | (packet.payload[15] << 24));
+    
+    // ToF
+    tof_l = static_cast<uint16_t>(packet.payload[16] | (packet.payload[17] << 8));
+    tof_c = static_cast<uint16_t>(packet.payload[18] | (packet.payload[19] << 8));
+    tof_r = static_cast<uint16_t>(packet.payload[20] | (packet.payload[21] << 8));
+    
+    // IMU
+    ax = static_cast<int16_t>(packet.payload[22] | (packet.payload[23] << 8));
+    ay = static_cast<int16_t>(packet.payload[24] | (packet.payload[25] << 8));
+    az = static_cast<int16_t>(packet.payload[26] | (packet.payload[27] << 8));
+    gx = static_cast<int16_t>(packet.payload[28] | (packet.payload[29] << 8));
+    gy = static_cast<int16_t>(packet.payload[30] | (packet.payload[31] << 8));
+    gz = static_cast<int16_t>(packet.payload[32] | (packet.payload[33] << 8));
+    yaw_x10 = static_cast<int16_t>(packet.payload[34] | (packet.payload[35] << 8));
+    
     return true;
 }
 

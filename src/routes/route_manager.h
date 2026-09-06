@@ -38,8 +38,10 @@ bool loadRoute(const String &routeId, JsonDocument &routeDoc);
 bool saveRoute(const String &routeId, const JsonDocument &routeDoc);
 bool deleteRoute(const String &routeId);
 
-// Teach Mode Control
-bool startTeaching(const String &name, const String &start, const String &destination, const String &description);
+// Train / Teach Mode Control
+bool startTeaching(const String &name, const String &start, const String &destination, const String &description, String &outError);
+bool startTeaching(const String &name, const String &start = "", const String &destination = "", const String &description = "");
+bool stopRecordingAndSave(String &outError);
 bool stopRecordingAndSave();
 void cancelRecording();
 void addTrajectoryPoint(float x, float y, float heading, const String &rfidTag);
@@ -59,5 +61,8 @@ String getCurrentCheckpoint();
 int getCheckpointIndex();
 int getTotalCheckpoints();
 float getMissionProgress();
+float getTeachDistance();
+uint32_t getTeachDurationS();
+void processTeachOdometry(float deltaDist_m, float yawDeg);
 
 #endif // ROUTE_MANAGER_H

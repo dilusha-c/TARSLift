@@ -36,6 +36,10 @@ void updateTelemetryHeading(float yawDeg);
 void updateTelemetryMotors(int16_t leftRpm, int16_t rightRpm, int16_t leftMms, int16_t rightMms);
 void updateTelemetryRawEncoders(int32_t left, int32_t right);
 void updateTelemetryTof(uint16_t leftMm, uint16_t centerMm, uint16_t rightMm);
+void updateTelemetryRFID(const String &uid);
+void updateTelemetryBattery(float volt, float curr, float pct);
+void resetTelemetryPosition();
+void updateTelemetryPositionDelta(float deltaMeters, float yawDeg);
 
 // Input from client manual control
 void handleDemoManualMove(const String &direction, int speedPct);

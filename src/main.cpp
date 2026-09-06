@@ -8,7 +8,9 @@
 #include "demo/demo_manager.h"
 #include "web/web_server.h"
 #include "web/websocket.h"
+#include "battery/battery_manager.h"
 #include "communication/uart_manager.h"
+#include "hardware/oled/oled_display.h"
 
 // Telemetry Broadcast Interval (ms)
 const unsigned long TELEMETRY_INTERVAL_MS = 200;
@@ -26,6 +28,7 @@ static unsigned long lastSystemUpdate = 0;
 static unsigned long lastUartUpdate = 0;
 static unsigned long lastRfidUpdate = 0;
 static unsigned long lastRouteUpdate = 0;
+static unsigned long lastOledUpdate = 0;
 
 // ============================================================================
 // CORE 0 TASK: Wi-Fi Stack, Web Server, and WebSocket Telemetry Broadcaster
@@ -37,6 +40,21 @@ void webTask(void *pvParameters) {
         if (now - lastTelemetryBroadcast >= TELEMETRY_INTERVAL_MS) {
             lastTelemetryBroadcast = now;
             broadcastTelemetry();
+        }
+
+        // Update OLED display every 500ms
+        if (now - lastOledUpdate >= 500) {
+            lastOledUpdate = now;
+            TelemetryData tele = getTelemetry();
+            String mode = (getAGVMode() == MODE_TEACH) ? "TEACH" : ((getAGVMode() == MODE_REPEAT) ? "REPEAT" : "IDLE");
+            AGVState st = getAGVState();
+            String stStr = "STOP";
+            if (st == STATE_RUNNING) stStr = "RUN";
+            else if (st == STATE_PAUSED) stStr = "PAUSE";
+            else if (st == STATE_RECORDING) stStr = "REC";
+            bool wifiSTA = (WiFi.status() == WL_CONNECTED);
+            String wifiIP = wifiSTA ? WiFi.localIP().toString() : "";
+            oledUpdateLive(tele, mode, stStr, isStm32Connected(), wifiSTA, wifiIP, getWifiRSSI());
         }
 
         // Background LAN Wi-Fi STA Reconnect Monitor (Every 10 seconds)
@@ -89,6 +107,7 @@ void realtimeTask(void *pvParameters) {
         if (now - lastSystemUpdate >= 50) {
             lastSystemUpdate = now;
             systemManagerUpdate();
+            batteryManagerUpdate();
         }
 
         if (DEMO_MODE) {
@@ -122,10 +141,28 @@ void realtimeTask(void *pvParameters) {
     }
 }
 
+#include "rfid/rfid_manager.h"
+
 void setup() {
     // Initialize serial console
+    // Initialize serial console
     Serial.begin(115200);
-    delay(1000);
+    // For native USB, wait until the host opens the port
+    unsigned long waitStart = millis();
+    while (!Serial && (millis() - waitStart) < 3000) { delay(10); }
+    // After 3 s we continue even if the host hasn't opened the port
+    Serial.println("System ready - type /scan in Serial Monitor");
+    // Heartbeat ticker (optional)
+    static unsigned long lastHb = 0;
+    if (millis() - lastHb >= 5000) {
+        Serial.println("[HB] ESP32 alive");
+        lastHb = millis();
+    }
+
+    // Initialize OLED display and play boot sequence
+    oledInit();
+    oledBootSequence();
+
     webSerialPrintln("\n==============================================");
     webSerialPrintln("TARSLIFT AGV - ESP32-S3 High-Level Controller");
     webSerialPrintln("==============================================");
@@ -162,9 +199,18 @@ void setup() {
     // Initialize STM32 UART Link
     stm32UartInit();
 
+    // Wait for STM32 to boot and establish comms
+    delay(1000);
+
+    // Send initial configuration to STM32
+    sendStm32EncoderConfig(sysSettings.wheel_circ_mm, sysSettings.enc_ppr_l, sysSettings.enc_ppr_r);
+    sendStm32TofConfig(sysSettings.tof_stop_distance_mm);
+    sendStm32PidTuning(sysSettings.pid_kp_l, sysSettings.pid_ki_l, sysSettings.pid_kd_l,
+                       sysSettings.pid_kp_r, sysSettings.pid_ki_r, sysSettings.pid_kd_r);
+    sendStm32PidEnable(sysSettings.enable_pid);
+
     // Push initial motor trim settings to STM32
     if (sysSettings.enable_stm32_uart && !sysSettings.demo_mode) {
-        delay(10); // Give STM32 a tiny moment to wake its UART
         sendStm32MotorTrim(
             sysSettings.motor_l_fwd_scale,
             sysSettings.motor_r_fwd_scale,
@@ -174,6 +220,7 @@ void setup() {
     }
 
     // Initialize Managers
+    batteryManagerInit();
     rfidManagerInit();
     routeManagerInit();
 
@@ -212,5 +259,13 @@ void setup() {
 }
 
 void loop() {
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    if (Serial.available()) {
+        String cmd = Serial.readStringUntil('\n');
+        cmd.trim();
+        if (cmd == "/scan") {
+            extern void testRFIDScan();
+            testRFIDScan();
+        }
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
 }
