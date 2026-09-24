@@ -1,8 +1,10 @@
 #include "system/system_manager.h"
 #include "communication/uart_manager.h"
+#include "demo/demo_manager.h"
 #include <LittleFS.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 
 
 static uint32_t bootTime = 0;
@@ -49,11 +51,14 @@ void applyProfileDefaults(int profileIndex) {
     sysSettings.battery_fault_detection = false;
     sysSettings.charging_status = false;
 
+    sysSettings.battery_max_voltage = 12.6f;
+    sysSettings.battery_min_voltage = 6.0f;
     sysSettings.low_voltage = 10.8f;
     sysSettings.critical_voltage = 10.2f;
     sysSettings.low_battery_pct = 20;
     sysSettings.critical_battery_pct = 10;
     sysSettings.demo_mode = false;
+    sysSettings.wifi_sta_enabled = false;
 
     switch(profileIndex) {
         case PROFILE_MOTOR_TEST: // 1
@@ -261,12 +266,15 @@ void loadSettings() {
                 sysSettings.battery_fault_detection = doc["battery_fault_detection"] | false;
                 sysSettings.charging_status = doc["charging_status"] | false;
 
+                sysSettings.battery_max_voltage = doc["battery_max_voltage"] | 12.6f;
+                sysSettings.battery_min_voltage = doc["battery_min_voltage"] | 6.0f;
                 sysSettings.low_voltage = doc["low_voltage"] | 10.8f;
                 sysSettings.critical_voltage = doc["critical_voltage"] | 10.2f;
                 sysSettings.low_battery_pct = doc["low_battery_pct"] | 20;
                 sysSettings.critical_battery_pct = doc["critical_battery_pct"] | 10;
 
                 sysSettings.demo_mode = doc["demo_mode"] | false;
+                sysSettings.wifi_sta_enabled = false;
                 
                 String ssid = doc["wifi_ssid"] | "";
                 String pass = doc["wifi_password"] | "";
@@ -280,13 +288,165 @@ void loadSettings() {
     }
 
     if (!fileLoaded) {
-        applyProfileDefaults(PROFILE_MOTOR_TEST);
+        applyProfileDefaults(PROFILE_FULL_SYSTEM);
         strncpy(sysSettings.wifi_ssid, "", sizeof(sysSettings.wifi_ssid));
         strncpy(sysSettings.wifi_password, "", sizeof(sysSettings.wifi_password));
         saveSettings();
     }
 }
 
+
+void saveSettingsNVS() {
+    Preferences prefs;
+    if (!prefs.begin("agv_cfg", false)) {
+        Serial.println("NVS: Failed to open namespace 'agv_cfg'");
+        return;
+    }
+    prefs.putBool("saved", true);
+    prefs.putInt("profile", sysSettings.test_profile);
+
+    // Kinematics & PID
+    prefs.putFloat("wheel_circ", sysSettings.wheel_circ_mm);
+    prefs.putUInt("enc_ppr_l", sysSettings.enc_ppr_l);
+    prefs.putUInt("enc_ppr_r", sysSettings.enc_ppr_r);
+    prefs.putFloat("pid_kp_l", sysSettings.pid_kp_l);
+    prefs.putFloat("pid_ki_l", sysSettings.pid_ki_l);
+    prefs.putFloat("pid_kd_l", sysSettings.pid_kd_l);
+    prefs.putFloat("pid_kp_r", sysSettings.pid_kp_r);
+    prefs.putFloat("pid_ki_r", sysSettings.pid_ki_r);
+    prefs.putFloat("pid_kd_r", sysSettings.pid_kd_r);
+    prefs.putBool("en_pid", sysSettings.enable_pid);
+
+    // Motor Trims
+    prefs.putUInt("mot_l_fwd", sysSettings.motor_l_fwd_scale);
+    prefs.putUInt("mot_r_fwd", sysSettings.motor_r_fwd_scale);
+    prefs.putUInt("mot_l_turn", sysSettings.motor_l_turn_scale);
+    prefs.putUInt("mot_r_turn", sysSettings.motor_r_turn_scale);
+
+    // Battery Thresholds & Estimation
+    prefs.putFloat("bat_max_v", sysSettings.battery_max_voltage);
+    prefs.putFloat("bat_min_v", sysSettings.battery_min_voltage);
+    prefs.putFloat("bat_low_v", sysSettings.low_voltage);
+    prefs.putFloat("bat_crit_v", sysSettings.critical_voltage);
+    prefs.putInt("bat_low_pct", sysSettings.low_battery_pct);
+    prefs.putInt("bat_crit_pct", sysSettings.critical_battery_pct);
+
+    // Obstacle Distance
+    prefs.putFloat("tof_stop_d", sysSettings.tof_stop_distance_mm);
+
+    // Navigation & Strategy
+    prefs.putInt("nav_mode", sysSettings.nav_mode);
+    prefs.putInt("drive_method", sysSettings.drive_method);
+    prefs.putFloat("lookahead_d", sysSettings.lookahead_distance);
+
+    // Network
+    prefs.putBool("sta_en", false);
+    prefs.putString("wifi_ssid", sysSettings.wifi_ssid);
+    prefs.putString("wifi_pass", sysSettings.wifi_password);
+
+    // Subsystem and Dashboard Toggles
+    prefs.putBool("en_dash", sysSettings.enable_dashboard);
+    prefs.putBool("en_teach", sysSettings.enable_teach_mode);
+    prefs.putBool("en_repeat", sysSettings.enable_repeat_mode);
+    prefs.putBool("en_manual", sysSettings.enable_manual_control);
+    prefs.putBool("en_route", sysSettings.enable_route_manager);
+    prefs.putBool("en_rfid_m", sysSettings.enable_rfid_manager);
+    prefs.putBool("en_err_log", sysSettings.enable_error_log);
+    prefs.putBool("en_sys_info", sysSettings.enable_system_info);
+    prefs.putBool("en_uart", sysSettings.enable_stm32_uart);
+    prefs.putBool("en_ws", sysSettings.enable_websocket);
+    prefs.putBool("en_motor", sysSettings.enable_motor_control);
+    prefs.putBool("en_encoder", sysSettings.enable_encoder);
+    prefs.putBool("en_mpu", sysSettings.enable_mpu6050);
+    prefs.putBool("en_rfid", sysSettings.rfid_reader);
+    prefs.putBool("en_tof", sysSettings.tof_sensors);
+    prefs.putBool("en_bat", sysSettings.battery_monitoring);
+    prefs.putBool("demo_mode", sysSettings.demo_mode);
+
+    prefs.end();
+    Serial.println("NVS: All settings permanently saved to NVS flash partition.");
+}
+
+void loadSettingsNVS() {
+    Preferences prefs;
+    if (!prefs.begin("agv_cfg", true)) { // Read-only mode
+        Serial.println("NVS: No 'agv_cfg' namespace found yet.");
+        return;
+    }
+    if (!prefs.getBool("saved", false)) {
+        prefs.end();
+        Serial.println("NVS: No previous user configuration saved in NVS.");
+        return;
+    }
+
+    int savedProfile = prefs.getInt("profile", sysSettings.test_profile);
+    sysSettings.test_profile = savedProfile;
+
+    // Kinematics & PID
+    sysSettings.wheel_circ_mm = prefs.getFloat("wheel_circ", sysSettings.wheel_circ_mm);
+    sysSettings.enc_ppr_l = (uint16_t)prefs.getUInt("enc_ppr_l", sysSettings.enc_ppr_l);
+    sysSettings.enc_ppr_r = (uint16_t)prefs.getUInt("enc_ppr_r", sysSettings.enc_ppr_r);
+    sysSettings.pid_kp_l = prefs.getFloat("pid_kp_l", sysSettings.pid_kp_l);
+    sysSettings.pid_ki_l = prefs.getFloat("pid_ki_l", sysSettings.pid_ki_l);
+    sysSettings.pid_kd_l = prefs.getFloat("pid_kd_l", sysSettings.pid_kd_l);
+    sysSettings.pid_kp_r = prefs.getFloat("pid_kp_r", sysSettings.pid_kp_r);
+    sysSettings.pid_ki_r = prefs.getFloat("pid_ki_r", sysSettings.pid_ki_r);
+    sysSettings.pid_kd_r = prefs.getFloat("pid_kd_r", sysSettings.pid_kd_r);
+    sysSettings.enable_pid = prefs.getBool("en_pid", sysSettings.enable_pid);
+
+    // Motor Trims
+    sysSettings.motor_l_fwd_scale = (uint16_t)prefs.getUInt("mot_l_fwd", sysSettings.motor_l_fwd_scale);
+    sysSettings.motor_r_fwd_scale = (uint16_t)prefs.getUInt("mot_r_fwd", sysSettings.motor_r_fwd_scale);
+    sysSettings.motor_l_turn_scale = (uint16_t)prefs.getUInt("mot_l_turn", sysSettings.motor_l_turn_scale);
+    sysSettings.motor_r_turn_scale = (uint16_t)prefs.getUInt("mot_r_turn", sysSettings.motor_r_turn_scale);
+
+    // Battery Thresholds & Estimation
+    sysSettings.battery_max_voltage = prefs.getFloat("bat_max_v", sysSettings.battery_max_voltage);
+    sysSettings.battery_min_voltage = prefs.getFloat("bat_min_v", sysSettings.battery_min_voltage);
+    sysSettings.low_voltage = prefs.getFloat("bat_low_v", sysSettings.low_voltage);
+    sysSettings.critical_voltage = prefs.getFloat("bat_crit_v", sysSettings.critical_voltage);
+    sysSettings.low_battery_pct = prefs.getInt("bat_low_pct", sysSettings.low_battery_pct);
+    sysSettings.critical_battery_pct = prefs.getInt("bat_crit_pct", sysSettings.critical_battery_pct);
+
+    // Obstacle Distance
+    sysSettings.tof_stop_distance_mm = prefs.getFloat("tof_stop_d", sysSettings.tof_stop_distance_mm);
+
+    // Navigation & Strategy
+    sysSettings.nav_mode = prefs.getInt("nav_mode", sysSettings.nav_mode);
+    sysSettings.drive_method = prefs.getInt("drive_method", sysSettings.drive_method);
+    sysSettings.lookahead_distance = prefs.getFloat("lookahead_d", sysSettings.lookahead_distance);
+
+    // Network
+    sysSettings.wifi_sta_enabled = false;
+    String ssid = prefs.getString("wifi_ssid", sysSettings.wifi_ssid);
+    strncpy(sysSettings.wifi_ssid, ssid.c_str(), sizeof(sysSettings.wifi_ssid));
+    String pass = prefs.getString("wifi_pass", sysSettings.wifi_password);
+    strncpy(sysSettings.wifi_password, pass.c_str(), sizeof(sysSettings.wifi_password));
+
+    // Subsystem and Dashboard Toggles
+    sysSettings.enable_dashboard = prefs.getBool("en_dash", sysSettings.enable_dashboard);
+    sysSettings.enable_teach_mode = prefs.getBool("en_teach", sysSettings.enable_teach_mode);
+    sysSettings.enable_repeat_mode = prefs.getBool("en_repeat", sysSettings.enable_repeat_mode);
+    sysSettings.enable_manual_control = prefs.getBool("en_manual", sysSettings.enable_manual_control);
+    sysSettings.enable_route_manager = prefs.getBool("en_route", sysSettings.enable_route_manager);
+    sysSettings.enable_rfid_manager = prefs.getBool("en_rfid_m", sysSettings.enable_rfid_manager);
+    sysSettings.enable_error_log = prefs.getBool("en_err_log", sysSettings.enable_error_log);
+    sysSettings.enable_system_info = prefs.getBool("en_sys_info", sysSettings.enable_system_info);
+    sysSettings.enable_stm32_uart = prefs.getBool("en_uart", sysSettings.enable_stm32_uart);
+    sysSettings.enable_websocket = prefs.getBool("en_ws", sysSettings.enable_websocket);
+    sysSettings.enable_motor_control = prefs.getBool("en_motor", sysSettings.enable_motor_control);
+    sysSettings.enable_encoder = prefs.getBool("en_encoder", sysSettings.enable_encoder);
+    sysSettings.enable_mpu6050 = prefs.getBool("en_mpu", sysSettings.enable_mpu6050);
+    sysSettings.rfid_reader = prefs.getBool("en_rfid", sysSettings.rfid_reader);
+    sysSettings.tof_sensors = prefs.getBool("en_tof", sysSettings.tof_sensors);
+    sysSettings.battery_monitoring = prefs.getBool("en_bat", sysSettings.battery_monitoring);
+    sysSettings.demo_mode = prefs.getBool("demo_mode", sysSettings.demo_mode);
+
+    prefs.end();
+    enforceSettingsDependencies();
+    Serial.printf("NVS: Loaded settings successfully! Profile: %d, Wheel: %.1f mm, Left PPR: %d, Kp_L: %.2f, STA_EN: %d\n",
+                  sysSettings.test_profile, sysSettings.wheel_circ_mm, sysSettings.enc_ppr_l, sysSettings.pid_kp_l, sysSettings.wifi_sta_enabled);
+}
 
 void saveSettings() {
     enforceSettingsDependencies();
@@ -358,28 +518,37 @@ void saveSettings() {
         doc["battery_fault_detection"] = sysSettings.battery_fault_detection;
         doc["charging_status"] = sysSettings.charging_status;
 
+        doc["battery_max_voltage"] = sysSettings.battery_max_voltage;
+        doc["battery_min_voltage"] = sysSettings.battery_min_voltage;
         doc["low_voltage"] = sysSettings.low_voltage;
         doc["critical_voltage"] = sysSettings.critical_voltage;
         doc["low_battery_pct"] = sysSettings.low_battery_pct;
         doc["critical_battery_pct"] = sysSettings.critical_battery_pct;
 
         doc["demo_mode"] = sysSettings.demo_mode;
+        doc["wifi_sta_enabled"] = sysSettings.wifi_sta_enabled;
         doc["wifi_ssid"] = sysSettings.wifi_ssid;
         doc["wifi_password"] = sysSettings.wifi_password;
 
         serializeJson(doc, file);
         file.close();
     }
+
+    // Also persist permanently to hardware NVS (survives firmware & uploadfs)
+    saveSettingsNVS();
 }
 
 void systemManagerInit() {
     bootTime = millis();
+    applyProfileDefaults(PROFILE_FULL_SYSTEM);
     if (!LittleFS.begin(true)) {
         Serial.println("SystemManager: Failed to mount LittleFS!");
     } else {
         Serial.println("SystemManager: LittleFS mounted successfully.");
         loadSettings();
     }
+    // Overlay NVS hardware settings (permanent, immune to upload and uploadfs)
+    loadSettingsNVS();
 }
 
 void systemManagerUpdate() {
@@ -452,10 +621,7 @@ void getLittleFSInfo(size_t &totalBytes, size_t &usedBytes) {
 }
 
 int8_t getWifiRSSI() {
-    if (WiFi.getMode() == WIFI_AP) {
-        return -45;
-    }
-    return WiFi.RSSI();
+    return -30; // Dedicated High-Power AP Hotspot
 }
 
 SystemHealth getSystemHealth() {
@@ -487,4 +653,26 @@ SystemHealth getSystemHealth() {
     health.battery = (SubsystemState)BATTERY_STATE;
 
     return health;
+}
+
+bool isObstacleDetected() {
+    if (!sysSettings.obstacle_detection && !sysSettings.tof_sensors) return false;
+    if (sysSettings.tof_stop_distance_mm <= 0.0f) return false;
+
+    uint16_t thresh = (uint16_t)sysSettings.tof_stop_distance_mm;
+    TelemetryData tele = getTelemetry();
+
+    bool hasIndividual = sysSettings.left_tof || sysSettings.centre_tof || sysSettings.right_tof;
+    if (hasIndividual) {
+        if (sysSettings.left_tof && tele.tof_left > 20 && tele.tof_left <= thresh) return true;
+        if (sysSettings.centre_tof && tele.tof_centre > 20 && tele.tof_centre <= thresh) return true;
+        if (sysSettings.right_tof && tele.tof_right > 20 && tele.tof_right <= thresh) return true;
+    } else {
+        if ((tele.tof_left > 20 && tele.tof_left <= thresh) ||
+            (tele.tof_centre > 20 && tele.tof_centre <= thresh) ||
+            (tele.tof_right > 20 && tele.tof_right <= thresh)) {
+            return true;
+        }
+    }
+    return false;
 }

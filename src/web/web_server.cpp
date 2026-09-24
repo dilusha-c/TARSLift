@@ -178,54 +178,25 @@ void webServerInit() {
         healthObj["battery"] = (int)health.battery;
         healthObj["uart"] = (int)health.uart;
 
-        // Dual IP reporting
+        // Dedicated AP IP reporting (Router STA disabled)
         doc["ap_ip"] = WiFi.softAPIP().toString();
-        doc["sta_ip"] = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "Disconnected";
-        doc["sta_connected"] = (WiFi.status() == WL_CONNECTED);
-        doc["sta_ssid"] = sysSettings.wifi_ssid;
+        doc["sta_ip"] = "Disabled";
+        doc["sta_connected"] = false;
+        doc["sta_ssid"] = "";
 
         sendJsonResponse(request, doc);
     });
 
-    // GET /api/wifi/scan
+    // GET /api/wifi/scan (Disabled in Dedicated AP-only High Power mode)
     server.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
-        int n = WiFi.scanNetworks();
         JsonDocument doc;
-        JsonArray networks = doc.to<JsonArray>();
-
-        for (int i = 0; i < n; ++i) {
-            JsonObject net = networks.add<JsonObject>();
-            net["ssid"] = WiFi.SSID(i);
-            net["rssi"] = WiFi.RSSI(i);
-            net["secure"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
-        }
-        WiFi.scanDelete();
+        doc.to<JsonArray>();
         sendJsonResponse(request, doc);
     });
 
-    // POST /api/wifi/connect
+    // POST /api/wifi/connect (Disabled - Dedicated AP-only High Power mode)
     server.on("/api/wifi/connect", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-        JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, data, len);
-        if (err) {
-            sendErrorResponse(request, "Invalid JSON payload");
-            return;
-        }
-
-        String ssid = doc["ssid"] | "";
-        String pass = doc["password"] | "";
-
-        if (ssid.length() == 0) {
-            sendErrorResponse(request, "SSID cannot be empty");
-            return;
-        }
-
-        strncpy(sysSettings.wifi_ssid, ssid.c_str(), sizeof(sysSettings.wifi_ssid));
-        strncpy(sysSettings.wifi_password, pass.c_str(), sizeof(sysSettings.wifi_password));
-        saveSettings();
-
-        WiFi.begin(sysSettings.wifi_ssid, sysSettings.wifi_password);
-        sendSuccessResponse(request, "Connecting to LAN Wi-Fi " + ssid);
+        sendErrorResponse(request, "Router (STA) connection is disabled. Dedicated High-Power Hotspot mode is active.");
     });
 
     // POST /api/teach/start
@@ -528,12 +499,15 @@ void webServerInit() {
         doc["battery_fault_detection"] = sysSettings.battery_fault_detection;
         doc["charging_status"] = sysSettings.charging_status;
 
+        doc["battery_max_voltage"] = sysSettings.battery_max_voltage;
+        doc["battery_min_voltage"] = sysSettings.battery_min_voltage;
         doc["low_voltage"] = sysSettings.low_voltage;
         doc["critical_voltage"] = sysSettings.critical_voltage;
         doc["low_battery_pct"] = sysSettings.low_battery_pct;
         doc["critical_battery_pct"] = sysSettings.critical_battery_pct;
 
         doc["demo_mode"] = sysSettings.demo_mode;
+        doc["wifi_sta_enabled"] = false;
         doc["wifi_ssid"] = sysSettings.wifi_ssid;
         doc["wifi_password"] = sysSettings.wifi_password;
 
@@ -621,6 +595,8 @@ void webServerInit() {
         }
 
         // Threshold values can always be set
+        if (doc.containsKey("battery_max_voltage")) sysSettings.battery_max_voltage = doc["battery_max_voltage"].as<float>();
+        if (doc.containsKey("battery_min_voltage")) sysSettings.battery_min_voltage = doc["battery_min_voltage"].as<float>();
         if (doc.containsKey("low_voltage")) sysSettings.low_voltage = doc["low_voltage"].as<float>();
         if (doc.containsKey("critical_voltage")) sysSettings.critical_voltage = doc["critical_voltage"].as<float>();
         if (doc.containsKey("low_battery_pct")) sysSettings.low_battery_pct = doc["low_battery_pct"].as<int>();
@@ -628,14 +604,7 @@ void webServerInit() {
 
         if (doc.containsKey("demo_mode")) sysSettings.demo_mode = doc["demo_mode"];
 
-        if (doc.containsKey("wifi_ssid")) {
-            String ssid = doc["wifi_ssid"];
-            strncpy(sysSettings.wifi_ssid, ssid.c_str(), sizeof(sysSettings.wifi_ssid));
-        }
-        if (doc.containsKey("wifi_password")) {
-            String pass = doc["wifi_password"];
-            strncpy(sysSettings.wifi_password, pass.c_str(), sizeof(sysSettings.wifi_password));
-        }
+        sysSettings.wifi_sta_enabled = false;
 
         saveSettings();
 
@@ -657,6 +626,7 @@ void webServerInit() {
                 sysSettings.pid_kp_r, sysSettings.pid_ki_r, sysSettings.pid_kd_r
             );
             sendStm32PidEnable(sysSettings.enable_pid);
+            sendStm32TofConfig(sysSettings.tof_stop_distance_mm);
         }
 
         sendSuccessResponse(request, "Settings updated successfully");
@@ -752,7 +722,7 @@ void webServerInit() {
     // ------------------------------------------------------------------------
     // WEB SERVER STATIC FILES FROM LittleFS
     // ------------------------------------------------------------------------
-    server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+    server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html").setCacheControl("max-age=86400");
 
     // Init websockets
     webSocketInit(&server);

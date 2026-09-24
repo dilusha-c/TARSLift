@@ -30,3 +30,5 @@
 ../AGV_Communication/agv_stm32_c.c:457:6:agv_parse_set_encoder_config	7
 ../AGV_Communication/agv_stm32_c.c:465:6:agv_parse_tof_data	7
 ../AGV_Communication/agv_stm32_c.c:473:10:agv_build_calibrate_imu	1
+../AGV_Communication/agv_stm32_c.c:481:6:agv_parse_set_tof_config	5
+../AGV_Communication/agv_stm32_c.c:487:10:agv_build_set_tof_config	1

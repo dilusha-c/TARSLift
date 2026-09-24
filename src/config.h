@@ -101,7 +101,9 @@ struct Settings {
     bool battery_fault_detection;
     bool charging_status;
 
-    // 7. Battery Thresholds
+    // 7. Battery Thresholds & Estimation
+    float battery_max_voltage;
+    float battery_min_voltage;
     float low_voltage;
     float critical_voltage;
     int low_battery_pct;
@@ -109,6 +111,7 @@ struct Settings {
 
     // Other configurations
     bool demo_mode;
+    bool wifi_sta_enabled;
     char wifi_ssid[32];
     char wifi_password[64];
 };
@@ -117,6 +120,8 @@ extern Settings sysSettings;
 
 void loadSettings();
 void saveSettings();
+void loadSettingsNVS();
+void saveSettingsNVS();
 void applyProfileDefaults(int profileIndex);
 
 // ============================================================================

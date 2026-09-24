@@ -94,8 +94,11 @@ static uint16_t enc_ppr_r = 287;
 static uint16_t repeat_speed_pct = 100; // default 100%
 
 static uint32_t last_pid_time = 0;
-static uint32_t last_tof_time = 0;  // Separate timer for ToF reads (slower rate)
+static uint32_t last_tof_time = 0;  // Separate timer for ToF reads
 static uint16_t cached_tof_l = 0, cached_tof_c = 0, cached_tof_r = 0;
+static float tof_stop_distance_mm = 150.0f; // Configured stop distance (mm). 0 = disabled.
+static bool obstacle_blocked = false;
+static bool is_bench_speed_test = false; // Bypass obstacle interlock during PID tuning bench tests
 
 static VL53L0X_Dev_t tof_left;
 static VL53L0X_Dev_t tof_center;
@@ -109,69 +112,6 @@ static float calib_sum = 0.0f;
 static uint32_t i2c_error_count = 0;
 
 /* USER CODE END PV */
-
-#define FLASH_USER_PAGE_ADDR 0x0800FC00 // Last 1KB page of 64K flash
-
-void Load_IMU_Offset(void) {
-    uint32_t magic = *(__IO uint32_t*)(FLASH_USER_PAGE_ADDR + 4);
-    if (magic == 0xDEADBEEF) {
-        uint32_t data_offset = *(__IO uint32_t*)FLASH_USER_PAGE_ADDR;
-        memcpy(&gyro_z_offset, &data_offset, sizeof(float));
-        
-        uint32_t data_yaw = *(__IO uint32_t*)(FLASH_USER_PAGE_ADDR + 8);
-        memcpy(&current_yaw_float, &data_yaw, sizeof(float));
-    }
-}
-
-void Save_IMU_Offset(void) {
-    // CRASH FIX 2: Flash erase/program MUST NOT be interrupted by the UART ISR.
-    HAL_NVIC_DisableIRQ(USART2_IRQn);
-
-    HAL_FLASH_Unlock();
-
-    // Clear any lingering error flags (PGERR, WRPERR) that would instantly block the erase/write
-    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_PGERR | FLASH_FLAG_WRPERR);
-
-    // Wait for any ongoing flash operation to complete
-    FLASH_WaitForLastOperation(HAL_MAX_DELAY);
-
-    FLASH_EraseInitTypeDef erase;
-    uint32_t pageError = 0;
-    erase.TypeErase = FLASH_TYPEERASE_PAGES;
-    erase.Banks = FLASH_BANK_1;
-    erase.PageAddress = FLASH_USER_PAGE_ADDR;
-    erase.NbPages = 1;
-
-    HAL_StatusTypeDef status = HAL_FLASHEx_Erase(&erase, &pageError);
-    if (status == HAL_OK) {
-        uint32_t data_offset, data_yaw;
-        memcpy(&data_offset, &gyro_z_offset, sizeof(float));
-        memcpy(&data_yaw, &current_yaw_float, sizeof(float));
-        
-        status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_USER_PAGE_ADDR, data_offset);
-        if (status == HAL_OK) {
-            status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_USER_PAGE_ADDR + 4, 0xDEADBEEF);
-        }
-        if (status == HAL_OK) {
-            status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_USER_PAGE_ADDR + 8, data_yaw);
-        }
-    }
-    HAL_FLASH_Lock();
-
-    // Re-enable UART ISR and restart byte reception
-    HAL_NVIC_EnableIRQ(USART2_IRQn);
-    HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
-
-    // Verify the save by reading back
-    uint32_t verify_magic = *(__IO uint32_t*)(FLASH_USER_PAGE_ADDR + 4);
-    if (verify_magic != 0xDEADBEEF || status != HAL_OK) {
-        // Flash save FAILED — toggle LED fast to indicate error
-        for (int i = 0; i < 20; i++) {
-            HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-            HAL_Delay(50);
-        }
-    }
-}
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
@@ -296,6 +236,16 @@ void AGV_STM32_DispatchCommand(const agv_packet_t *pkt) {
             break;
         }
 
+        case AGV_CMD_SET_TOF_CONFIG: {
+            float stop_dist = 0.0f;
+            if (agv_parse_set_tof_config(pkt, &stop_dist)) {
+                tof_stop_distance_mm = stop_dist;
+                uint16_t tx_len = agv_build_ack(AGV_CMD_SET_TOF_CONFIG, AGV_RESULT_OK, pkt->seq, tx_buf, sizeof(tx_buf));
+                HAL_UART_Transmit(&huart2, tx_buf, tx_len, 100);
+            }
+            break;
+        }
+
         case AGV_CMD_SET_ENCODER_CONFIG: {
             float wheel_circ; uint16_t ppr_l, ppr_r;
             if (agv_parse_set_encoder_config(pkt, &wheel_circ, &ppr_l, &ppr_r)) {
@@ -333,6 +283,7 @@ void AGV_STM32_DispatchCommand(const agv_packet_t *pkt) {
         }
 
         case AGV_CMD_MOVE: {
+            is_bench_speed_test = false;
             int32_t distance_mm = 0;
             uint16_t speed_mm_s = 0;
             if (agv_parse_move(pkt, &distance_mm, &speed_mm_s)) {
@@ -363,14 +314,18 @@ void AGV_STM32_DispatchCommand(const agv_packet_t *pkt) {
         }
 
         case AGV_CMD_TURN: {
+            is_bench_speed_test = false;
             int16_t angle_deg_x10 = 0;
             uint16_t speed_deg_s = 0;
             if (agv_parse_turn(pkt, &angle_deg_x10, &speed_deg_s)) {
                 current_yaw_deg_x10 += angle_deg_x10;
 
-                // Closed-Loop Turn Mapping (skid steer)
-                // Roughly map degrees/s to RPM (can be tuned later)
-                float turn_rpm = speed_deg_s * 1.5f; 
+                // Closed-Loop Turn Mapping: convert turning speed to differential wheel RPM
+                float track_width_mm = 160.0f;
+                float turn_speed_rad_s = (speed_deg_s * 3.14159f) / 180.0f;
+                float wheel_speed_mm_s = turn_speed_rad_s * (track_width_mm / 2.0f);
+                float turn_rpm = (wheel_speed_mm_s * 60.0f) / enc_wheel_circ_mm;
+                turn_rpm = turn_rpm * repeat_speed_pct / 100.0f;
                 
                 if (angle_deg_x10 > 0) { // Turn Right
                     target_rpm_L = turn_rpm;
@@ -390,6 +345,7 @@ void AGV_STM32_DispatchCommand(const agv_packet_t *pkt) {
         }
 
         case AGV_CMD_STOP: {
+            is_bench_speed_test = false;
             target_rpm_L = 0;
             target_rpm_R = 0;
             pid_integral_L = 0;
@@ -408,6 +364,7 @@ void AGV_STM32_DispatchCommand(const agv_packet_t *pkt) {
                 // Convert mm/s to RPM
                 target_rpm_L = (left_speed_mm_s * 60.0f) / enc_wheel_circ_mm;
                 target_rpm_R = (right_speed_mm_s * 60.0f) / enc_wheel_circ_mm;
+                is_bench_speed_test = (target_rpm_L != 0.0f || target_rpm_R != 0.0f);
 
                 uint16_t tx_len = agv_build_ack(AGV_CMD_SET_SPEEDS, AGV_RESULT_OK, pkt->seq, tx_buf, sizeof(tx_buf));
                 HAL_UART_Transmit(&huart2, tx_buf, tx_len, 100);
@@ -488,30 +445,6 @@ int main(void)
   MX_TIM1_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
-
-  /* I2C BUS RECOVERY: If MCU resets mid-I2C transfer, a sensor may hold SDA
-     LOW, permanently locking the I2C peripheral. Before calling MX_I2C1_Init,
-     manually clock SCL 9 times as GPIO outputs to force any slave to release.
-     STM32F1 I2C1: SCL=PB6, SDA=PB7. */
-  {
-    GPIO_InitTypeDef recov = {0};
-    recov.Pin   = GPIO_PIN_6 | GPIO_PIN_7;
-    recov.Mode  = GPIO_MODE_OUTPUT_OD;  // open-drain to match I2C physical layer
-    recov.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOB, &recov);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6 | GPIO_PIN_7, GPIO_PIN_SET);
-    HAL_Delay(1);
-    for (int i = 0; i < 9; i++) {
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET); HAL_Delay(1);
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);   HAL_Delay(1);
-    }
-    // Generate a STOP condition: SDA LOW -> HIGH while SCL is HIGH
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); HAL_Delay(1);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);   HAL_Delay(1);
-    // Deinit GPIO so HAL_I2C_Init can re-configure them in AF_OD mode
-    HAL_GPIO_DeInit(GPIOB, GPIO_PIN_6 | GPIO_PIN_7);
-  }
-
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   agv_stm32_parser_init(&agv_parser);
@@ -648,10 +581,9 @@ int main(void)
         }
 
         // Read real hardware encoders (16-bit cast to handle underflow/overflow correctly for deltas)
-        // Fix swapped encoder wiring and invert right encoder polarity
         static int32_t last_enc_l = 0, last_enc_r = 0;
         int32_t current_enc_l = (int16_t)__HAL_TIM_GET_COUNTER(&htim3);
-        int32_t current_enc_r = -(int16_t)__HAL_TIM_GET_COUNTER(&htim2);
+        int32_t current_enc_r = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
         
         int16_t delta_l = (int16_t)(current_enc_l - last_enc_l);
         int16_t delta_r = (int16_t)(current_enc_r - last_enc_r);
@@ -755,8 +687,27 @@ int main(void)
 
         float out_R = ff_R + (pid_kp_R * err_R) + (pid_ki_R * pid_integral_R) + (pid_kd_R * deriv_R);
 
+        // Obstacle Safety Check (Front ToF Sensors)
+        bool is_obstacle = false;
+        if (tof_stop_distance_mm > 0.0f) {
+            uint16_t thresh = (uint16_t)tof_stop_distance_mm;
+            if ((cached_tof_l > 20 && cached_tof_l <= thresh) ||
+                (cached_tof_c > 20 && cached_tof_c <= thresh) ||
+                (cached_tof_r > 20 && cached_tof_r <= thresh)) {
+                is_obstacle = true;
+            }
+        }
+        obstacle_blocked = is_obstacle;
+        float net_forward = (target_rpm_L + target_rpm_R) / 2.0f;
+
         // Apply output
         if (target_rpm_L == 0.0f && target_rpm_R == 0.0f) {
+            Motor_SetSpeed(0, 0);
+            pid_integral_L = 0;
+            pid_integral_R = 0;
+        } else if (obstacle_blocked && net_forward > 0.0f && !is_bench_speed_test) {
+            // Forward motion blocked by obstacle during autonomous drive! Stop motors and clear integrals.
+            // When obstacle clears (obstacle_blocked becomes false), motion automatically resumes!
             Motor_SetSpeed(0, 0);
             pid_integral_L = 0;
             pid_integral_R = 0;
@@ -796,7 +747,7 @@ int main(void)
     // Each VL53L0X read can take up to 50ms on timeout, so reading
     // all 3 at 20Hz (50ms cycle) can starve the MPU6050 PID loop.
     // ================================================================
-    if (now - last_tof_time >= 200) {
+    if (now - last_tof_time >= 100) { // 10Hz ToF updates
         last_tof_time = now;
         // Non-blocking architecture: Only read if data is ready.
         // If a sensor fails or hangs, it will be skipped instantly!
@@ -820,7 +771,7 @@ int main(void)
         }
 
         int32_t left_pulses = (int16_t)__HAL_TIM_GET_COUNTER(&htim3);
-        int32_t right_pulses = -(int16_t)__HAL_TIM_GET_COUNTER(&htim2);
+        int32_t right_pulses = (int16_t)__HAL_TIM_GET_COUNTER(&htim2);
         
         // Build unified telemetry packet
         uint16_t tx_len = agv_build_telemetry_sync(
@@ -1019,11 +970,11 @@ static void MX_TIM2_Init(void)
   sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 15;
+  sConfig.IC1Filter = 0;
   sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC2Filter = 15;
+  sConfig.IC2Filter = 0;
   if (HAL_TIM_Encoder_Init(&htim2, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -1068,11 +1019,11 @@ static void MX_TIM3_Init(void)
   sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 15;
+  sConfig.IC1Filter = 0;
   sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC2Filter = 15;
+  sConfig.IC2Filter = 0;
   if (HAL_TIM_Encoder_Init(&htim3, &sConfig) != HAL_OK)
   {
     Error_Handler();

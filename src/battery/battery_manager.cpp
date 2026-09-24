@@ -36,8 +36,10 @@ void batteryManagerUpdate() {
         
         float loadvoltage = busvoltage + (shuntvoltage / 1000);
         
-        // Very basic 3S LiPo percentage estimation (8.6V max, 6.0V min)
-        float pct = ((loadvoltage - 6.0f) / (8.6f - 6.0f)) * 100.0f;
+        // Dynamic LiPo percentage estimation from configured min/max voltage
+        float vMin = sysSettings.battery_min_voltage > 0.0f ? sysSettings.battery_min_voltage : 6.0f;
+        float vMax = sysSettings.battery_max_voltage > vMin ? sysSettings.battery_max_voltage : 12.6f;
+        float pct = ((loadvoltage - vMin) / (vMax - vMin)) * 100.0f;
         if (pct > 100.0f) pct = 100.0f;
         if (pct < 0.0f) pct = 0.0f;
         

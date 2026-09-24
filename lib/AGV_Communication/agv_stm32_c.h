@@ -31,6 +31,7 @@ extern "C" {
 #define AGV_CMD_SET_PID_TUNING    0x15
 #define AGV_CMD_SET_ENCODER_CONFIG 0x16
 #define AGV_CMD_SET_PID_ENABLE    0x17
+#define AGV_CMD_SET_TOF_CONFIG    0x18
 #define AGV_CMD_SET_SPEEDS        0x19
 #define AGV_CMD_CALIBRATE_IMU     0x1A
 
@@ -141,6 +142,8 @@ bool agv_parse_set_pid_tuning(const agv_packet_t *pkt, float *kpL, float *kiL, f
 bool agv_parse_set_pid_enable(const agv_packet_t *pkt, bool *enabled);
 bool agv_parse_set_encoder_config(const agv_packet_t *pkt, float *wheel_circ, uint16_t *ppr_l, uint16_t *ppr_r);
 bool agv_parse_tof_data(const agv_packet_t *pkt, uint16_t *left_mm, uint16_t *center_mm, uint16_t *right_mm);
+bool agv_parse_set_tof_config(const agv_packet_t *pkt, float *stop_dist_mm);
+uint16_t agv_build_set_tof_config(float stop_dist_mm, uint8_t seq, uint8_t *out_buf, uint16_t max_len);
 
 #ifdef __cplusplus
 }

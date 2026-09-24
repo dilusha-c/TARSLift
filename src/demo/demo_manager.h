@@ -20,12 +20,15 @@ struct TelemetryData {
     int16_t left_mms;
     int16_t right_mms;
     int16_t target_rpm;
+    int16_t target_l_rpm;
+    int16_t target_r_rpm;
     int32_t raw_enc_l;
     int32_t raw_enc_r;
 };
 
 void demoManagerInit();
 void demoManagerUpdate();
+void setDemoTargetRpm(float targetL, float targetR);
 
 // Telemetry output
 TelemetryData getTelemetry();

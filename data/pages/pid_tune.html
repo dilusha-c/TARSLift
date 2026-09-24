@@ -75,21 +75,42 @@
 </div>
 
 <div class="card">
-    <div class="card-header">
-        <h3>Master PID Target Control</h3>
+    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <h3>PID Motor Target Speed</h3>
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <label class="switch-container">
+                <input type="checkbox" id="sync-pid-target" checked>
+                <span class="switch-slider"></span>
+                <span class="switch-label">Sync Motors</span>
+            </label>
+            <label class="switch-container">
+                <input type="checkbox" id="pid-master-toggle" checked>
+                <span class="switch-slider"></span>
+                <span class="switch-label">Enable PID</span>
+            </label>
+        </div>
     </div>
     <div class="card-body">
-        <div class="settings-grid">
-            <div class="setting-item">
-                <label for="pid-master-toggle">Enable Master PID Control</label>
-                <label class="switch">
-                    <input type="checkbox" id="pid-master-toggle">
-                    <span class="slider round"></span>
-                </label>
+        <div style="background: rgba(15, 23, 42, 0.6); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 20px;">
+            <div class="settings-grid">
+                <div class="setting-item slider-item">
+                    <label for="set-target-rpm-l" style="color: #f97316; font-weight: bold;">Left Target: <span id="lbl-target-rpm-l">0</span> RPM</label>
+                    <input type="range" id="set-target-rpm-l" min="-250" max="250" value="0">
+                </div>
+                <div class="setting-item slider-item">
+                    <label for="set-target-rpm-r" style="color: #a855f7; font-weight: bold;">Right Target: <span id="lbl-target-rpm-r">0</span> RPM</label>
+                    <input type="range" id="set-target-rpm-r" min="-250" max="250" value="0">
+                </div>
+                <input type="range" id="set-target-rpm" min="-250" max="250" value="0" style="display: none;">
+                <span id="lbl-target-rpm" style="display: none;">0</span>
             </div>
-            <div class="setting-item slider-item">
-                <label for="set-target-rpm">Target Speed: <span id="lbl-target-rpm">0</span> RPM</label>
-                <input type="range" id="set-target-rpm" min="-250" max="250" value="0">
+            <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-preset-stop" style="color: #ef4444; border-color: #ef4444;">🛑 Stop (0 RPM)</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-preset-test-l">Test Left (60 RPM)</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-preset-test-r">Test Right (60 RPM)</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-preset-both-50">Both 50 RPM</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-preset-both-100">Both 100 RPM</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-preset-rev">-50 Reverse</button>
             </div>
         </div>
     </div>
@@ -137,11 +158,31 @@
     </div>
     <div class="card-body">
         <div style="display: flex; flex-direction: column; gap: 20px;">
-            <div style="width: 100%; height: 250px;">
-                <canvas id="chart-motor-pid-l"></canvas>
+            <div style="width: 100%; height: 260px; background: rgba(30, 41, 59, 0.35); padding: 15px; border-radius: 8px; border: 1px solid rgba(249, 115, 22, 0.3);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 2px solid #f97316;">
+                    <h4 style="margin: 0; color: #f97316;">Left Motor (M1)</h4>
+                    <div style="font-size: 0.8rem; font-family: monospace; display: flex; gap: 8px;">
+                        <span>Target: <b id="disp-pid-target-l" style="color: #f97316;">0</b></span>
+                        <span>Actual: <b id="disp-pid-actual-l" style="color: #10b981;">0</b></span>
+                        <span>Err: <b id="disp-pid-err-l" style="color: #cbd5e1;">0</b></span>
+                    </div>
+                </div>
+                <div style="position: relative; height: 210px; width: 100%;">
+                    <canvas id="chart-motor-pid-l"></canvas>
+                </div>
             </div>
-            <div style="width: 100%; height: 250px;">
-                <canvas id="chart-motor-pid-r"></canvas>
+            <div style="width: 100%; height: 260px; background: rgba(30, 41, 59, 0.35); padding: 15px; border-radius: 8px; border: 1px solid rgba(168, 85, 247, 0.3);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 2px solid #a855f7;">
+                    <h4 style="margin: 0; color: #a855f7;">Right Motor (M2)</h4>
+                    <div style="font-size: 0.8rem; font-family: monospace; display: flex; gap: 8px;">
+                        <span>Target: <b id="disp-pid-target-r" style="color: #a855f7;">0</b></span>
+                        <span>Actual: <b id="disp-pid-actual-r" style="color: #06b6d4;">0</b></span>
+                        <span>Err: <b id="disp-pid-err-r" style="color: #cbd5e1;">0</b></span>
+                    </div>
+                </div>
+                <div style="position: relative; height: 210px; width: 100%;">
+                    <canvas id="chart-motor-pid-r"></canvas>
+                </div>
             </div>
         </div>
     </div>

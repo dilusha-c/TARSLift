@@ -36,5 +36,6 @@ float getEsp32TempC();
 void getLittleFSInfo(size_t &totalBytes, size_t &usedBytes);
 int8_t getWifiRSSI();
 SystemHealth getSystemHealth();
+bool isObstacleDetected();
 
 #endif // SYSTEM_MANAGER_H

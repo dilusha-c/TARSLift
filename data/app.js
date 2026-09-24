@@ -141,6 +141,12 @@ function switchView(viewId) {
     if (viewId === "rfid") loadRFIDList();
     if (viewId === "errors") loadErrorLogs();
     if (viewId === "repeat") populateRouteDropdown();
+    if (viewId === "pid_tune") {
+        setTimeout(() => {
+            if (window.pidChartLeft) window.pidChartLeft.resize();
+            if (window.pidChartRight) window.pidChartRight.resize();
+        }, 50);
+    }
 }
 
 /* ============================================================================
@@ -275,9 +281,18 @@ function updateDashboardTelemetry(tele) {
             else statusEl.style.color = "var(--text-muted)";
         }
 
-        document.getElementById("dash-tof-l").innerText = `${tele.tof.left} mm`;
-        document.getElementById("dash-tof-c").innerText = `${tele.tof.centre} mm`;
-        document.getElementById("dash-tof-r").innerText = `${tele.tof.right} mm`;
+        const stopDist = tele.obstacle_stop_dist || 150;
+        const toflEl = document.getElementById("dash-tof-l");
+        const tofcEl = document.getElementById("dash-tof-c");
+        const tofrEl = document.getElementById("dash-tof-r");
+
+        toflEl.innerText = `${tele.tof.left} mm`;
+        tofcEl.innerText = `${tele.tof.centre} mm`;
+        tofrEl.innerText = `${tele.tof.right} mm`;
+
+        toflEl.style.color = (tele.tof.left > 20 && tele.tof.left <= stopDist) ? "var(--color-red)" : "";
+        tofcEl.style.color = (tele.tof.centre > 20 && tele.tof.centre <= stopDist) ? "var(--color-red)" : "";
+        tofrEl.style.color = (tele.tof.right > 20 && tele.tof.right <= stopDist) ? "var(--color-red)" : "";
 
         document.getElementById("dash-motor-l").innerText = `${tele.motor.left_rpm} RPM`;
         document.getElementById("dash-motor-r").innerText = `${tele.motor.right_rpm} RPM`;
@@ -345,6 +360,17 @@ function updateDashboardTelemetry(tele) {
         document.getElementById("repeat-lbl-coords").innerText = `${tele.x.toFixed(2)}, ${tele.y.toFixed(2)} m`;
         document.getElementById("repeat-lbl-heading").innerText = `${tele.heading.toFixed(1)}°`;
 
+        const obsEl = document.getElementById("repeat-lbl-obstacle");
+        if (obsEl) {
+            if (tele.obstacle_detected) {
+                obsEl.innerText = "OBSTACLE DETECTED";
+                obsEl.className = "val text-red";
+            } else {
+                obsEl.innerText = "CLEAR";
+                obsEl.className = "val text-green";
+            }
+        }
+
         const isRunning = (tele.mode === "REPEAT" && tele.state === "RUNNING");
         const isPaused = (tele.mode === "REPEAT" && tele.state === "PAUSED");
         
@@ -378,24 +404,79 @@ function updateDashboardTelemetry(tele) {
         }
         
         if (typeof updatePidCharts === "function") {
-            let target = 0;
+            let targetL = 0, targetR = 0;
+            const targetSliderL = document.getElementById("set-target-rpm-l");
+            const targetSliderR = document.getElementById("set-target-rpm-r");
             const targetSlider = document.getElementById("set-target-rpm");
-            if (targetSlider) target = parseFloat(targetSlider.value) || 0;
-            updatePidCharts(target, tele.enc_l_rpm || 0, tele.enc_r_rpm || 0);
+            
+            if (targetSliderL) targetL = parseFloat(targetSliderL.value) || 0;
+            else if (targetSlider) targetL = parseFloat(targetSlider.value) || 0;
+
+            if (targetSliderR) targetR = parseFloat(targetSliderR.value) || 0;
+            else if (targetSlider) targetR = parseFloat(targetSlider.value) || 0;
+
+            updatePidCharts(targetL, targetR, tele.enc_l_rpm || 0, tele.enc_r_rpm || 0);
         }
 
         // ToF Updates
         if (tele.tof) {
-            document.getElementById("sys-tof-l").innerText = `${tele.tof.left} mm`;
-            document.getElementById("sys-tof-c").innerText = `${tele.tof.centre} mm`;
-            document.getElementById("sys-tof-r").innerText = `${tele.tof.right} mm`;
+            const stopDist = tele.obstacle_stop_dist || 150;
+            const sysTofL = document.getElementById("sys-tof-l");
+            const sysTofC = document.getElementById("sys-tof-c");
+            const sysTofR = document.getElementById("sys-tof-r");
+            if (sysTofL) {
+                sysTofL.innerText = `${tele.tof.left} mm`;
+                sysTofL.style.color = (tele.tof.left > 20 && tele.tof.left <= stopDist) ? "var(--color-red)" : "var(--primary-color)";
+            }
+            if (sysTofC) {
+                sysTofC.innerText = `${tele.tof.centre} mm`;
+                sysTofC.style.color = (tele.tof.centre > 20 && tele.tof.centre <= stopDist) ? "var(--color-red)" : "var(--primary-color)";
+            }
+            if (sysTofR) {
+                sysTofR.innerText = `${tele.tof.right} mm`;
+                sysTofR.style.color = (tele.tof.right > 20 && tele.tof.right <= stopDist) ? "var(--color-red)" : "var(--primary-color)";
+            }
         }
 
         // IMU Updates
         if (tele.heading !== undefined) {
-            document.getElementById("sys-imu-heading").innerText = `${tele.heading.toFixed(1)}°`;
+            const headingVal = typeof tele.heading === "number" ? tele.heading.toFixed(1) : tele.heading;
+            const imuEl = document.getElementById("sys-imu-heading");
+            if (imuEl) imuEl.innerText = `${headingVal}°`;
             const needle = document.getElementById("compass-needle");
             if (needle) needle.style.transform = `rotate(${tele.heading}deg)`;
+        }
+
+        // RFID Reader Updates
+        const sysRfidUid = document.getElementById("sys-rfid-uid");
+        const sysRfidName = document.getElementById("sys-rfid-name");
+        const rfidStatusDot = document.getElementById("rfid-status-dot");
+        const rfidStatusText = document.getElementById("rfid-status-text");
+        const rfidHwDot = document.getElementById("rfid-hw-dot");
+        const rfidHwText = document.getElementById("rfid-hw-text");
+
+        const displayUid = (tele.rfid && tele.rfid !== "NONE") ? tele.rfid : ((tele.last_rfid && tele.last_rfid !== "NONE") ? tele.last_rfid : "NONE");
+        if (sysRfidUid) sysRfidUid.innerText = displayUid;
+        if (sysRfidName) {
+            const tagName = tele.rfid_name || tele.last_rfid_name || getTagNameFromRegistry(displayUid) || "---";
+            sysRfidName.innerText = tagName;
+        }
+        if (rfidStatusDot && rfidStatusText) {
+            if (tele.rfid && tele.rfid !== "NONE") {
+                rfidStatusDot.className = "status-dot green";
+                rfidStatusText.innerText = "TAG DETECTED";
+                rfidStatusText.style.color = "var(--color-green)";
+            } else {
+                rfidStatusDot.className = "status-dot gray";
+                rfidStatusText.innerText = "NO TAG PRESENT";
+                rfidStatusText.style.color = "var(--text-muted)";
+            }
+        }
+        if (rfidHwDot && rfidHwText) {
+            if (tele.rfid_hw_ok !== undefined) {
+                rfidHwDot.className = tele.rfid_hw_ok ? "status-dot green" : "status-dot red";
+                rfidHwText.innerText = tele.rfid_hw_ok ? "SPI MFRC522: READY" : "SPI MFRC522: ERROR";
+            }
         }
 
 
@@ -1521,13 +1602,20 @@ function loadSettingsFromServer() {
         document.getElementById("set-bat-fault").checked = s.battery_fault_detection;
         document.getElementById("set-bat-charge").checked = s.charging_status;
 
+        document.getElementById("set-bat-max-v").value = s.battery_max_voltage !== undefined ? s.battery_max_voltage : 12.6;
+        document.getElementById("set-bat-min-v").value = s.battery_min_voltage !== undefined ? s.battery_min_voltage : 6.0;
         document.getElementById("set-thresh-low-v").value = s.low_voltage;
         document.getElementById("set-thresh-crit-v").value = s.critical_voltage;
         document.getElementById("set-thresh-low-pct").value = s.low_battery_pct;
-        document.getElementById("set-thresh-crit-pct").value = s.critical_battery_pct;
-
         document.getElementById("set-wifi-ssid").value = s.wifi_ssid || "TARSLIFT_AGV";
         document.getElementById("set-wifi-pass").value = s.wifi_password || "12345678";
+
+        const staEnCheck = document.getElementById("set-wifi-sta-en");
+        if (staEnCheck) staEnCheck.checked = false;
+        const lanSsidInput = document.getElementById("set-lan-ssid");
+        if (lanSsidInput) lanSsidInput.value = s.wifi_ssid || "";
+        const lanPassInput = document.getElementById("set-lan-pass");
+        if (lanPassInput) lanPassInput.value = s.wifi_password || "";
         
         document.getElementById("set-pid-kp-l").value = s.pid_kp_l !== undefined ? s.pid_kp_l.toFixed(2) : "1.00";
         document.getElementById("set-pid-ki-l").value = s.pid_ki_l !== undefined ? s.pid_ki_l.toFixed(2) : "0.00";
@@ -1682,9 +1770,10 @@ function initSettingsManager() {
         
         const body = {
             test_profile: profileVal,
-            wifi_ssid: document.getElementById("set-wifi-ssid").value,
-            wifi_password: document.getElementById("set-wifi-pass").value,
-            demo_mode: document.getElementById("set-sys-demo").checked,
+            wifi_sta_enabled: false,
+            wifi_ssid: document.getElementById("set-wifi-ssid") ? document.getElementById("set-wifi-ssid").value : "TARSLIFT_AGV",
+            wifi_password: document.getElementById("set-wifi-pass") ? document.getElementById("set-wifi-pass").value : "12345678",
+            demo_mode: document.getElementById("set-sys-demo") ? document.getElementById("set-sys-demo").checked : false,
             motor_l_fwd_scale: parseInt(document.getElementById("set-trim-l-fwd").value),
             motor_r_fwd_scale: parseInt(document.getElementById("set-trim-r-fwd").value),
             motor_l_turn_scale: parseInt(document.getElementById("set-trim-l-turn").value),
@@ -1748,6 +1837,8 @@ function initSettingsManager() {
     // Save battery thresholds
     document.getElementById("btn-settings-save-battery").addEventListener("click", () => {
         const body = {
+            battery_max_voltage: parseFloat(document.getElementById("set-bat-max-v").value) || 12.6,
+            battery_min_voltage: parseFloat(document.getElementById("set-bat-min-v").value) || 6.0,
             low_voltage: parseFloat(document.getElementById("set-thresh-low-v").value),
             critical_voltage: parseFloat(document.getElementById("set-thresh-crit-v").value),
             low_battery_pct: parseInt(document.getElementById("set-thresh-low-pct").value),
@@ -1841,24 +1932,28 @@ function initSettingsManager() {
     const btnSaveLan = document.getElementById("btn-lan-save");
 
     if (btnScanWifi && scanSelect) {
-        btnScanWifi.addEventListener("click", () => {
-            btnScanWifi.disabled = true;
-            btnScanWifi.innerText = "⏳ SCANNING...";
-            scanSelect.innerHTML = `<option value="">Scanning Wi-Fi networks...</option>`;
-
+        const performWifiScan = (retryCount = 0) => {
             fetch(`${apiUrl}/api/wifi/scan`)
                 .then(r => r.json())
-                .then(networks => {
+                .then(data => {
+                    if (data && data.status === "scanning" && retryCount < 10) {
+                        setTimeout(() => performWifiScan(retryCount + 1), 1000);
+                        return;
+                    }
+
                     btnScanWifi.disabled = false;
                     btnScanWifi.innerText = "🔍 SCAN";
                     scanSelect.innerHTML = `<option value="">-- Select Scanned Network --</option>`;
 
-                    if (Array.isArray(networks) && networks.length > 0) {
+                    const networks = Array.isArray(data) ? data : [];
+                    if (networks.length > 0) {
                         networks.forEach(net => {
+                            if (!net.ssid) return;
                             const opt = document.createElement("option");
                             opt.value = net.ssid;
                             const secIcon = net.secure ? "🔒" : "🔓";
-                            opt.innerText = `${secIcon} ${net.ssid} (${net.rssi} dBm)`;
+                            const chInfo = net.channel ? `, Ch ${net.channel}` : "";
+                            opt.innerText = `${secIcon} ${net.ssid} (${net.rssi} dBm${chInfo})`;
                             scanSelect.appendChild(opt);
                         });
                         showToast(`Found ${networks.length} Wi-Fi networks!`, "success");
@@ -1871,6 +1966,13 @@ function initSettingsManager() {
                     btnScanWifi.innerText = "🔍 SCAN";
                     showToast("Wi-Fi scan failed: " + err, "error");
                 });
+        };
+
+        btnScanWifi.addEventListener("click", () => {
+            btnScanWifi.disabled = true;
+            btnScanWifi.innerText = "⏳ SCANNING...";
+            scanSelect.innerHTML = `<option value="">Scanning Wi-Fi networks...</option>`;
+            performWifiScan();
         });
 
         scanSelect.addEventListener("change", () => {
@@ -1883,26 +1985,32 @@ function initSettingsManager() {
 
     if (btnSaveLan) {
         btnSaveLan.addEventListener("click", () => {
+            const staEnabled = document.getElementById("set-wifi-sta-en") ? document.getElementById("set-wifi-sta-en").checked : true;
             const ssid = document.getElementById("set-lan-ssid").value.trim();
             const pass = document.getElementById("set-lan-pass").value.trim();
 
-            if (!ssid) {
-                showToast("SSID cannot be empty", "warning");
+            if (staEnabled && !ssid) {
+                showToast("SSID cannot be empty when router connection is enabled", "warning");
                 return;
             }
 
-            showToast(`Connecting to LAN Wi-Fi '${ssid}'...`, "info");
+            if (staEnabled) {
+                showToast(`Connecting to LAN Wi-Fi '${ssid}'...`, "info");
+            } else {
+                showToast("Disabling Router connection (AP-only mode)...", "info");
+            }
+
             fetch(`${apiUrl}/api/wifi/connect`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ssid: ssid, password: pass })
+                body: JSON.stringify({ wifi_sta_enabled: staEnabled, ssid: ssid, password: pass })
             })
             .then(r => r.json())
             .then(res => {
                 if (res.status === "success") {
-                    showToast("Credentials saved! ESP32 background task connecting...", "success");
+                    showToast(res.message || "Wi-Fi settings saved!", "success");
                 } else {
-                    showToast("Connection failed: " + res.message, "error");
+                    showToast("Failed: " + res.message, "error");
                 }
             })
             .catch(err => showToast("Error connecting to LAN: " + err, "error"));
@@ -2626,22 +2734,117 @@ function initPIDTuneManager() {
     bindSliderLabel("set-trim-r-fwd", "lbl-trim-r-fwd");
     bindSliderLabel("set-trim-l-turn", "lbl-trim-l-turn");
     bindSliderLabel("set-trim-r-turn", "lbl-trim-r-turn");
+    bindSliderLabel("set-target-rpm-l", "lbl-target-rpm-l");
+    bindSliderLabel("set-target-rpm-r", "lbl-target-rpm-r");
     bindSliderLabel("set-target-rpm", "lbl-target-rpm");
     
-    const targetRpmSlider = document.getElementById("set-target-rpm");
-    if (targetRpmSlider) {
-        targetRpmSlider.addEventListener("change", (e) => {
-            const rpm = parseFloat(e.target.value);
-            if (wsConn && wsConn.readyState === WebSocket.OPEN) {
-                wsConn.send(JSON.stringify({ type: "update_target_rpm", data: { rpm: rpm } }));
-                showToast("Target RPM set to " + rpm, "info");
-                
-                // Update PID chart targets immediately
-                if (window.pidDataLeft) window.pidDataLeft.target.fill(rpm);
-                if (window.pidDataRight) window.pidDataRight.target.fill(rpm);
+    const sliderTargetL = document.getElementById("set-target-rpm-l");
+    const sliderTargetR = document.getElementById("set-target-rpm-r");
+    const syncCheckbox = document.getElementById("sync-pid-target");
+
+    const sendTargetRpmUpdate = (rpmL, rpmR) => {
+        if (wsConn && wsConn.readyState === WebSocket.OPEN) {
+            wsConn.send(JSON.stringify({ type: "update_target_rpm", data: { rpmL: rpmL, rpmR: rpmR, rpm: (rpmL + rpmR) / 2 } }));
+            
+            // Update PID chart targets immediately
+            if (window.pidDataLeft) window.pidDataLeft.target.fill(rpmL);
+            if (window.pidDataRight) window.pidDataRight.target.fill(rpmR);
+            if (window.pidChartLeft) {
+                window.pidChartLeft.data.datasets[0].data = window.pidDataLeft.target;
+                window.pidChartLeft.update();
+            }
+            if (window.pidChartRight) {
+                window.pidChartRight.data.datasets[0].data = window.pidDataRight.target;
+                window.pidChartRight.update();
+            }
+        }
+    };
+
+    const setBothTargetSliders = (valL, valR, sendWs = true) => {
+        if (sliderTargetL) {
+            sliderTargetL.value = valL;
+            const lblL = document.getElementById("lbl-target-rpm-l");
+            if (lblL) lblL.innerText = valL;
+        }
+        if (sliderTargetR) {
+            sliderTargetR.value = valR;
+            const lblR = document.getElementById("lbl-target-rpm-r");
+            if (lblR) lblR.innerText = valR;
+        }
+        const oldSlider = document.getElementById("set-target-rpm");
+        if (oldSlider) {
+            oldSlider.value = valL;
+            const lbl = document.getElementById("lbl-target-rpm");
+            if (lbl) lbl.innerText = valL;
+        }
+        if (sendWs) sendTargetRpmUpdate(valL, valR);
+    };
+
+    if (sliderTargetL) {
+        sliderTargetL.addEventListener("input", (e) => {
+            const val = parseFloat(e.target.value) || 0;
+            if (syncCheckbox && syncCheckbox.checked && sliderTargetR) {
+                sliderTargetR.value = val;
+                const lblR = document.getElementById("lbl-target-rpm-r");
+                if (lblR) lblR.innerText = val;
             }
         });
+        sliderTargetL.addEventListener("change", (e) => {
+            const valL = parseFloat(e.target.value) || 0;
+            const valR = (syncCheckbox && syncCheckbox.checked) ? valL : (parseFloat(sliderTargetR?.value) || 0);
+            setBothTargetSliders(valL, valR, true);
+            showToast(`Target Speeds: L ${valL} RPM, R ${valR} RPM`, "info");
+        });
     }
+
+    if (sliderTargetR) {
+        sliderTargetR.addEventListener("input", (e) => {
+            const val = parseFloat(e.target.value) || 0;
+            if (syncCheckbox && syncCheckbox.checked && sliderTargetL) {
+                sliderTargetL.value = val;
+                const lblL = document.getElementById("lbl-target-rpm-l");
+                if (lblL) lblL.innerText = val;
+            }
+        });
+        sliderTargetR.addEventListener("change", (e) => {
+            const valR = parseFloat(e.target.value) || 0;
+            const valL = (syncCheckbox && syncCheckbox.checked) ? valR : (parseFloat(sliderTargetL?.value) || 0);
+            setBothTargetSliders(valL, valR, true);
+            showToast(`Target Speeds: L ${valL} RPM, R ${valR} RPM`, "info");
+        });
+    }
+
+    // Quick Target RPM Preset Buttons
+    const btnStop = document.getElementById("btn-preset-stop");
+    const btnTestL = document.getElementById("btn-preset-test-l");
+    const btnTestR = document.getElementById("btn-preset-test-r");
+    const btnBoth50 = document.getElementById("btn-preset-both-50");
+    const btnBoth100 = document.getElementById("btn-preset-both-100");
+    const btnRev = document.getElementById("btn-preset-rev");
+
+    if (btnStop) btnStop.addEventListener("click", () => setBothTargetSliders(0, 0, true));
+    if (btnTestL) btnTestL.addEventListener("click", () => {
+        if (syncCheckbox) syncCheckbox.checked = false;
+        setBothTargetSliders(60, 0, true);
+        showToast("Testing Left Motor @ 60 RPM (Right = 0)", "info");
+    });
+    if (btnTestR) btnTestR.addEventListener("click", () => {
+        if (syncCheckbox) syncCheckbox.checked = false;
+        setBothTargetSliders(0, 60, true);
+        showToast("Testing Right Motor @ 60 RPM (Left = 0)", "info");
+    });
+    if (btnBoth50) btnBoth50.addEventListener("click", () => {
+        if (syncCheckbox) syncCheckbox.checked = true;
+        setBothTargetSliders(50, 50, true);
+    });
+    if (btnBoth100) btnBoth100.addEventListener("click", () => {
+        if (syncCheckbox) syncCheckbox.checked = true;
+        setBothTargetSliders(100, 100, true);
+    });
+    if (btnRev) btnRev.addEventListener("click", () => {
+        if (syncCheckbox) syncCheckbox.checked = true;
+        setBothTargetSliders(-50, -50, true);
+    });
 
     // PID realtime WebSocket broadcast
     let pidState = {
@@ -2698,19 +2901,50 @@ function initPIDTuneManager() {
         btnApplyLive.addEventListener("click", sendPidTuning);
     }
 
-    // Chart.js init
+    // Chart.js init with distinct themes for Left (Orange/Emerald) vs Right (Purple/Cyan)
     if (typeof Chart !== 'undefined') {
-        const createPidChart = (ctxId) => {
+        const createPidChart = (ctxId, isRight) => {
             const ctx = document.getElementById(ctxId);
             if (!ctx) return null;
+            const targetColor = isRight ? '#a855f7' : '#f97316'; // Purple (M2) vs Orange (M1)
+            const actualColor = isRight ? '#06b6d4' : '#10b981'; // Cyan (M2) vs Emerald Green (M1)
+            const namePrefix = isRight ? 'Right' : 'Left';
+
             return new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: Array(50).fill(''),
                     datasets: [
-                        { label: 'Target RPM', borderColor: 'rgba(239, 68, 68, 1)', data: Array(50).fill(0), fill: false, pointRadius: 0, tension: 0.1, borderWidth: 2 },
-                        { label: 'Actual RPM', borderColor: 'rgba(59, 130, 246, 1)', data: Array(50).fill(0), fill: false, pointRadius: 0, tension: 0.1, borderWidth: 2 },
-                        { label: '0 Axis', borderColor: 'rgba(234, 179, 8, 0.5)', data: Array(50).fill(0), fill: false, pointRadius: 0, tension: 0, borderWidth: 1, borderDash: [5, 5] }
+                        { 
+                            label: `${namePrefix} Target RPM`, 
+                            borderColor: targetColor, 
+                            borderDash: [5, 4],
+                            data: Array(50).fill(0), 
+                            fill: false, 
+                            pointRadius: 0, 
+                            tension: 0.1, 
+                            borderWidth: 2 
+                        },
+                        { 
+                            label: `${namePrefix} Actual RPM`, 
+                            borderColor: actualColor, 
+                            backgroundColor: isRight ? 'rgba(6, 182, 212, 0.12)' : 'rgba(16, 185, 129, 0.12)',
+                            data: Array(50).fill(0), 
+                            fill: true, 
+                            pointRadius: 0, 
+                            tension: 0.2, 
+                            borderWidth: 2.5 
+                        },
+                        { 
+                            label: '0 Axis', 
+                            borderColor: 'rgba(148, 163, 184, 0.35)', 
+                            data: Array(50).fill(0), 
+                            fill: false, 
+                            pointRadius: 0, 
+                            tension: 0, 
+                            borderWidth: 1, 
+                            borderDash: [3, 3] 
+                        }
                     ]
                 },
                 options: {
@@ -2718,24 +2952,34 @@ function initPIDTuneManager() {
                     maintainAspectRatio: false,
                     animation: false,
                     scales: {
-                        y: { min: -400, max: 400 },
+                        y: { 
+                            min: -250, 
+                            max: 250,
+                            grid: { color: 'rgba(255, 255, 255, 0.06)' }
+                        },
                         x: { display: false }
                     },
-                    plugins: { legend: { display: true, position: 'top' } }
+                    plugins: { 
+                        legend: { 
+                            display: true, 
+                            position: 'top',
+                            labels: { color: '#94a3b8', boxWidth: 14, font: { size: 11 } }
+                        } 
+                    }
                 }
             });
         };
         
-        window.pidChartLeft = createPidChart('chart-motor-pid-l');
-        window.pidChartRight = createPidChart('chart-motor-pid-r');
+        window.pidChartLeft = createPidChart('chart-motor-pid-l', false);
+        window.pidChartRight = createPidChart('chart-motor-pid-r', true);
         window.pidDataLeft = { target: Array(50).fill(0), actual: Array(50).fill(0) };
         window.pidDataRight = { target: Array(50).fill(0), actual: Array(50).fill(0) };
         
-        window.updatePidCharts = function(target, actualL, actualR) {
-            window.pidDataLeft.target.shift(); window.pidDataLeft.target.push(target);
+        window.updatePidCharts = function(targetL, targetR, actualL, actualR) {
+            window.pidDataLeft.target.shift(); window.pidDataLeft.target.push(targetL);
             window.pidDataLeft.actual.shift(); window.pidDataLeft.actual.push(actualL);
             
-            window.pidDataRight.target.shift(); window.pidDataRight.target.push(target);
+            window.pidDataRight.target.shift(); window.pidDataRight.target.push(targetR);
             window.pidDataRight.actual.shift(); window.pidDataRight.actual.push(actualR);
             
             if (window.pidChartLeft) {
@@ -2748,6 +2992,20 @@ function initPIDTuneManager() {
                 window.pidChartRight.data.datasets[1].data = window.pidDataRight.actual;
                 window.pidChartRight.update();
             }
+
+            const dispTL = document.getElementById("disp-pid-target-l");
+            const dispAL = document.getElementById("disp-pid-actual-l");
+            const dispEL = document.getElementById("disp-pid-err-l");
+            if (dispTL) dispTL.innerText = Math.round(targetL);
+            if (dispAL) dispAL.innerText = Math.round(actualL);
+            if (dispEL) dispEL.innerText = Math.round(targetL - actualL);
+
+            const dispTR = document.getElementById("disp-pid-target-r");
+            const dispAR = document.getElementById("disp-pid-actual-r");
+            const dispER = document.getElementById("disp-pid-err-r");
+            if (dispTR) dispTR.innerText = Math.round(targetR);
+            if (dispAR) dispAR.innerText = Math.round(actualR);
+            if (dispER) dispER.innerText = Math.round(targetR - actualR);
         };
     }
 
@@ -2982,6 +3240,48 @@ function initPIDTuneManager() {
                     btnPprStart.innerText = "START MEASUREMENT";
                 }
             });
+        });
+    }
+
+    // System Config: RFID Action Buttons
+    const btnSysRegRfid = document.getElementById("btn-sys-register-rfid");
+    if (btnSysRegRfid) {
+        btnSysRegRfid.addEventListener("click", () => {
+            const uidEl = document.getElementById("sys-rfid-uid");
+            const uid = uidEl ? uidEl.innerText.trim() : "";
+            if (!uid || uid === "NONE") {
+                showToast("No active tag to register. Place a tag on reader first.", "warning");
+                return;
+            }
+            const name = prompt(`Enter name for RFID Tag (${uid}):`, `Station_${uid.replace(/\s+/g, '').slice(-4)}`);
+            if (!name) return;
+            fetch(`${apiUrl}/api/rfid/register`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ uid: uid, name: name })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === "success") {
+                    showToast(`Tag ${uid} registered as '${name}'!`, "success");
+                    if (typeof loadRFIDList === "function") loadRFIDList();
+                } else {
+                    showToast(data.message || "Registration failed", "error");
+                }
+            })
+            .catch(() => showToast("Failed to register tag", "error"));
+        });
+    }
+
+    const btnSysTestRfid = document.getElementById("btn-sys-test-rfid");
+    if (btnSysTestRfid) {
+        btnSysTestRfid.addEventListener("click", () => {
+            fetch(`${apiUrl}/api/status`)
+            .then(res => res.json())
+            .then(d => {
+                showToast(`RFID SPI Test: ${d.rfid_hw_ok ? "MFRC522 OK" : "Reader Comm Error"} | Last Tag: ${d.last_rfid || "None"}`, d.rfid_hw_ok ? "success" : "error");
+            })
+            .catch(() => showToast("Failed to contact AGV", "error"));
         });
     }
 }

@@ -42,7 +42,7 @@ _Min_Heap_Size = 0x200; /* required amount of heap */
 /* CRASH FIX 5: Original stack 0x400 (1KB) was too small for deep call chains:
    DispatchCommand (128B local buf) + Kalman FP frames + VL53L0X init.
    Increased to 0x800 (2KB) to prevent stack overflow / HardFault. */
-_Min_Stack_Size = 0x800; /* required amount of stack */
+_Min_Stack_Size = 0x400; /* required amount of stack */
 
 /* Memories definition */
 MEMORY

@@ -5,6 +5,7 @@
 #include "rfid/rfid_manager.h"
 #include "communication/uart_manager.h"
 #include "demo/demo_manager.h"
+#include "system/system_manager.h"
 
 static AGVMode currentMode = MODE_IDLE;
 static AGVState currentState = STATE_STOPPED;
@@ -74,6 +75,18 @@ void routeManagerUpdate() {
             }
         }
         else if (currentMode == MODE_REPEAT && currentState == STATE_RUNNING) {
+            // Obstacle safety interlock: if obstacle is detected, pause route progression
+            if (isObstacleDetected()) {
+                static unsigned long lastObsWarn = 0;
+                if (millis() - lastObsWarn > 2500) {
+                    lastObsWarn = millis();
+                    Serial.println("RouteManager: Obstacle detected in path! AGV paused. Waiting for clear path...");
+                }
+                sendStm32Stop();
+                repeatStartTime += 20; // Maintain elapsed timer while halted (50Hz cycle)
+                return;
+            }
+
             // Handle Repeat Mode Simulation
             if (DEMO_MODE) {
                 static unsigned long lastTick = 0;

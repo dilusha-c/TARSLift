@@ -1,11 +1,25 @@
 #include "demo/demo_manager.h"
 #include "config.h"
 #include "routes/route_manager.h"
+#include "system/system_manager.h"
 
 static TelemetryData tele;
 static String activeDirection = "";
 static int driveSpeedPercentage = 50;
 static unsigned long lastUpdate = 0;
+
+static float demoTargetL = 0.0f;
+static float demoTargetR = 0.0f;
+static float simActualL = 0.0f;
+static float simActualR = 0.0f;
+
+void setDemoTargetRpm(float targetL, float targetR) {
+    demoTargetL = targetL;
+    demoTargetR = targetR;
+    tele.target_l_rpm = (int16_t)targetL;
+    tele.target_r_rpm = (int16_t)targetR;
+    tele.target_rpm = (int16_t)((targetL + targetR) / 2.0f);
+}
 
 // Demo coordinates for RFID checkpoints
 struct DemoCheckpoint {
@@ -37,6 +51,12 @@ void demoManagerInit() {
     tele.left_rpm = 0;
     tele.right_rpm = 0;
     tele.target_rpm = 0;
+    tele.target_l_rpm = 0;
+    tele.target_r_rpm = 0;
+    demoTargetL = 0.0f;
+    demoTargetR = 0.0f;
+    simActualL = 0.0f;
+    simActualR = 0.0f;
     
     lastUpdate = millis();
 }
@@ -55,9 +75,9 @@ void demoManagerUpdate() {
         tele.battery_volt = 9.0f + (tele.battery_pct / 100.0f) * 3.6f;
         
         // Simulate ToF sensors fluctuating slightly
-        tele.tof_left = constrain(tele.tof_left + random(-20, 21), 150, 2000);
-        tele.tof_centre = constrain(tele.tof_centre + random(-25, 26), 150, 2000);
-        tele.tof_right = constrain(tele.tof_right + random(-20, 21), 150, 2000);
+        tele.tof_left = constrain(tele.tof_left + random(-20, 21), 400, 2000);
+        tele.tof_centre = constrain(tele.tof_centre + random(-25, 26), 400, 2000);
+        tele.tof_right = constrain(tele.tof_right + random(-20, 21), 400, 2000);
 
         // Apply motion if a manual direction or repeat trajectory is active
         if (getAGVMode() == MODE_TEACH || getAGVMode() == MODE_IDLE) {
@@ -65,19 +85,26 @@ void demoManagerUpdate() {
             float speedVal = (driveSpeedPercentage * sysSettings.wheel_circ_mm) / 60000.0f;
 
             if (activeDirection == "FORWARD") {
-                tele.speed = speedVal;
-                tele.left_rpm = driveSpeedPercentage;
-                tele.right_rpm = driveSpeedPercentage;
-                tele.target_rpm = driveSpeedPercentage;
-                
-                // Calculate components based on heading (degrees to radians)
-                float rad = tele.heading * DEG_TO_RAD;
-                tele.x += tele.speed * cos(rad) * dt;
-                tele.y += tele.speed * sin(rad) * dt;
+                if (isObstacleDetected()) {
+                    tele.speed = 0.0f;
+                    tele.left_rpm = 0;
+                    tele.right_rpm = 0;
+                    tele.target_rpm = 0;
+                } else {
+                    tele.speed = speedVal;
+                    tele.left_rpm = driveSpeedPercentage;
+                    tele.right_rpm = driveSpeedPercentage;
+                    tele.target_rpm = driveSpeedPercentage;
+                    
+                    // Calculate components based on heading (degrees to radians)
+                    float rad = tele.heading * DEG_TO_RAD;
+                    tele.x += tele.speed * cos(rad) * dt;
+                    tele.y += tele.speed * sin(rad) * dt;
 
-                // Report points during teach mode
-                if (getAGVMode() == MODE_TEACH) {
-                    addTrajectoryPoint(tele.x, tele.y, tele.heading, tele.rfid);
+                    // Report points during teach mode
+                    if (getAGVMode() == MODE_TEACH) {
+                        addTrajectoryPoint(tele.x, tele.y, tele.heading, tele.rfid);
+                    }
                 }
             } 
             else if (activeDirection == "REVERSE") {
@@ -109,31 +136,59 @@ void demoManagerUpdate() {
                 tele.heading += (driveSpeedPercentage / 1.5f) * dt;
             } 
             else {
-                // STOP
+                // Not moving via directional control - check if PID tuning targets are set
+                if (demoTargetL != 0.0f || demoTargetR != 0.0f || fabs(simActualL) > 0.1f || fabs(simActualR) > 0.1f) {
+                    float alpha = 0.20f;
+                    simActualL += (demoTargetL - simActualL) * alpha;
+                    simActualR += (demoTargetR - simActualR) * alpha;
+                    
+                    float jitterL = (fabs(simActualL) > 1.0f) ? (random(-15, 16) / 10.0f) : 0.0f;
+                    float jitterR = (fabs(simActualR) > 1.0f) ? (random(-15, 16) / 10.0f) : 0.0f;
+
+                    tele.speed = ((simActualL + simActualR) / 2.0f / 60.0f) * (sysSettings.wheel_circ_mm / 1000.0f);
+                    tele.left_rpm = (int16_t)(simActualL + jitterL);
+                    tele.right_rpm = (int16_t)(simActualR + jitterR);
+                    tele.left_mms = (int16_t)((tele.left_rpm / 60.0f) * sysSettings.wheel_circ_mm);
+                    tele.right_mms = (int16_t)((tele.right_rpm / 60.0f) * sysSettings.wheel_circ_mm);
+                    tele.target_l_rpm = (int16_t)demoTargetL;
+                    tele.target_r_rpm = (int16_t)demoTargetR;
+                    tele.target_rpm = (int16_t)((demoTargetL + demoTargetR) / 2.0f);
+                } else {
+                    // STOP
+                    tele.speed = 0.0f;
+                    tele.left_rpm = 0;
+                    tele.right_rpm = 0;
+                    tele.target_rpm = 0;
+                    tele.target_l_rpm = 0;
+                    tele.target_r_rpm = 0;
+                }
+            }
+        } 
+        else if (getAGVMode() == MODE_REPEAT && getAGVState() == STATE_RUNNING) {
+            if (isObstacleDetected()) {
                 tele.speed = 0.0f;
                 tele.left_rpm = 0;
                 tele.right_rpm = 0;
                 tele.target_rpm = 0;
+            } else {
+                // Telemetry follows Repeat Mission simulation in RouteManager
+                tele.speed = 0.32f;
+                tele.target_rpm = 60;
+                tele.left_rpm = 60;
+                tele.right_rpm = 60;
+                
+                // Simulating coordinate movement along a path loop
+                static float repeatAngle = 0.0f;
+                repeatAngle += 10.0f * dt;
+                tele.heading = repeatAngle;
+                
+                float rad = tele.heading * DEG_TO_RAD;
+                tele.x = 1.0f + cos(rad);
+                tele.y = 1.0f + sin(rad);
+                
+                // Update rfid tag based on progress
+                tele.rfid = getCurrentCheckpoint();
             }
-        } 
-        else if (getAGVMode() == MODE_REPEAT && getAGVState() == STATE_RUNNING) {
-            // Telemetry follows Repeat Mission simulation in RouteManager
-            tele.speed = 0.32f;
-            tele.target_rpm = 60;
-            tele.left_rpm = 60;
-            tele.right_rpm = 60;
-            
-            // Simulating coordinate movement along a path loop
-            static float repeatAngle = 0.0f;
-            repeatAngle += 10.0f * dt;
-            tele.heading = repeatAngle;
-            
-            float rad = tele.heading * DEG_TO_RAD;
-            tele.x = 1.0f + cos(rad);
-            tele.y = 1.0f + sin(rad);
-            
-            // Update rfid tag based on progress
-            tele.rfid = getCurrentCheckpoint();
         }
 
         // Keep heading normalized between 0-360 degrees
@@ -173,6 +228,13 @@ void handleDemoManualMove(const String &direction, int speedPct) {
 void handleDemoManualStop() {
     if (DEMO_MODE) {
         activeDirection = "";
+        demoTargetL = 0.0f;
+        demoTargetR = 0.0f;
+        simActualL = 0.0f;
+        simActualR = 0.0f;
+        tele.target_rpm = 0;
+        tele.target_l_rpm = 0;
+        tele.target_r_rpm = 0;
         Serial.println("DemoManager: Manual Stop received.");
     }
 }

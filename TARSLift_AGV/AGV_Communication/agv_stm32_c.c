@@ -477,3 +477,18 @@ uint16_t agv_build_calibrate_imu(uint8_t seq, uint8_t *out_buf, uint16_t max_len
     pkt.length = 0;
     return agv_encode_packet(&pkt, out_buf, max_len);
 }
+
+bool agv_parse_set_tof_config(const agv_packet_t *pkt, float *stop_dist_mm) {
+    if (pkt == NULL || pkt->cmd != AGV_CMD_SET_TOF_CONFIG || pkt->length < 4) return false;
+    if (stop_dist_mm) memcpy(stop_dist_mm, &pkt->payload[0], 4);
+    return true;
+}
+
+uint16_t agv_build_set_tof_config(float stop_dist_mm, uint8_t seq, uint8_t *out_buf, uint16_t max_len) {
+    agv_packet_t pkt;
+    pkt.cmd = AGV_CMD_SET_TOF_CONFIG;
+    pkt.seq = seq;
+    pkt.length = 4;
+    memcpy(&pkt.payload[0], &stop_dist_mm, 4);
+    return agv_encode_packet(&pkt, out_buf, max_len);
+}

@@ -6,7 +6,7 @@
     <title>TARSLIFT AGV Dashboard</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="css/responsive.css">
-    <script src="js/chart.min.js"></script>
+    <script src="js/chart.min.js" defer></script>
 </head>
 <body>
     <!-- App Layout Container -->
@@ -749,25 +749,64 @@
                         </div>
 
                         <div class="card" style="margin-bottom: 20px;">
-                            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                                 <h3>Motor PID Tuning</h3>
-                                <label class="switch-container">
-                                    <input type="checkbox" id="set-pid-enable" checked>
-                                    <span class="switch-slider"></span>
-                                    <span class="switch-label">Enable PID Control</span>
-                                </label>
+                                <div style="display: flex; align-items: center; gap: 15px;">
+                                    <label class="switch-container">
+                                        <input type="checkbox" id="sync-pid-target" checked>
+                                        <span class="switch-slider"></span>
+                                        <span class="switch-label">Sync Motors</span>
+                                    </label>
+                                    <label class="switch-container">
+                                        <input type="checkbox" id="set-pid-enable" checked>
+                                        <span class="switch-slider"></span>
+                                        <span class="switch-label">Enable PID Control</span>
+                                    </label>
+                                </div>
                             </div>
                             <div class="card-body">
-                                <div class="form-row" style="margin-bottom: 20px;">
-                                    <div class="form-group" style="flex: 1;">
-                                        <label>Target Speed (RPM) : <span id="lbl-target-rpm">0</span></label>
-                                        <input type="range" id="set-target-rpm" min="-250" max="250" value="0">
+                                <!-- Dual Motor Target Speed Controls -->
+                                <div style="background: rgba(15, 23, 42, 0.6); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 20px;">
+                                    <div class="form-row" style="gap: 20px; align-items: center;">
+                                        <div class="form-group" style="flex: 1;">
+                                            <div style="display: flex; justify-content: space-between;">
+                                                <label style="color: #f97316; font-weight: bold;">Left Target: <span id="lbl-target-rpm-l">0</span> RPM</label>
+                                                <span style="font-size: 0.8rem; color: var(--text-muted);">M1 (Left)</span>
+                                            </div>
+                                            <input type="range" id="set-target-rpm-l" min="-250" max="250" value="0">
+                                        </div>
+                                        <div class="form-group" style="flex: 1;">
+                                            <div style="display: flex; justify-content: space-between;">
+                                                <label style="color: #a855f7; font-weight: bold;">Right Target: <span id="lbl-target-rpm-r">0</span> RPM</label>
+                                                <span style="font-size: 0.8rem; color: var(--text-muted);">M2 (Right)</span>
+                                            </div>
+                                            <input type="range" id="set-target-rpm-r" min="-250" max="250" value="0">
+                                        </div>
+                                        <!-- Backward compatibility hidden slider -->
+                                        <input type="range" id="set-target-rpm" min="-250" max="250" value="0" style="display: none;">
+                                        <span id="lbl-target-rpm" style="display: none;">0</span>
+                                    </div>
+                                    <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
+                                        <button type="button" class="btn btn-secondary btn-sm" id="btn-preset-stop" style="color: #ef4444; border-color: #ef4444;">🛑 Stop (0 RPM)</button>
+                                        <button type="button" class="btn btn-secondary btn-sm" id="btn-preset-test-l">Test Left (60 RPM)</button>
+                                        <button type="button" class="btn btn-secondary btn-sm" id="btn-preset-test-r">Test Right (60 RPM)</button>
+                                        <button type="button" class="btn btn-secondary btn-sm" id="btn-preset-both-50">Both 50 RPM</button>
+                                        <button type="button" class="btn btn-secondary btn-sm" id="btn-preset-both-100">Both 100 RPM</button>
+                                        <button type="button" class="btn btn-secondary btn-sm" id="btn-preset-rev">-50 Reverse</button>
                                     </div>
                                 </div>
+
                                 <div class="form-row" style="gap: 20px;">
                                     <!-- Left Motor PID -->
-                                    <div style="flex: 1; min-width: 300px;">
-                                        <h4 style="margin-bottom: 15px; color: var(--text-main); border-bottom: 1px solid var(--border-color); padding-bottom: 5px;">Left Motor</h4>
+                                    <div style="flex: 1; min-width: 320px; background: rgba(30, 41, 59, 0.35); padding: 15px; border-radius: 8px; border: 1px solid rgba(249, 115, 22, 0.3);">
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 2px solid #f97316;">
+                                            <h4 style="margin: 0; color: #f97316;">Left Motor (M1)</h4>
+                                            <div style="font-size: 0.8rem; font-family: monospace; display: flex; gap: 8px;">
+                                                <span>Target: <b id="disp-pid-target-l" style="color: #f97316;">0</b></span>
+                                                <span>Actual: <b id="disp-pid-actual-l" style="color: #10b981;">0</b></span>
+                                                <span>Err: <b id="disp-pid-err-l" style="color: #cbd5e1;">0</b></span>
+                                            </div>
+                                        </div>
                                         <div class="form-row">
                                             <div class="form-group" style="flex: 1;">
                                                 <label>Kp</label>
@@ -782,14 +821,21 @@
                                                 <input type="number" id="set-pid-kd-l" step="0.1" min="0" max="500" value="0.0">
                                             </div>
                                         </div>
-                                        <div style="position: relative; height: 250px; width: 100%;">
+                                        <div style="position: relative; height: 260px; width: 100%; margin-top: 10px;">
                                             <canvas id="chart-motor-pid-l"></canvas>
                                         </div>
                                     </div>
 
                                     <!-- Right Motor PID -->
-                                    <div style="flex: 1; min-width: 300px;">
-                                        <h4 style="margin-bottom: 15px; color: var(--text-main); border-bottom: 1px solid var(--border-color); padding-bottom: 5px;">Right Motor</h4>
+                                    <div style="flex: 1; min-width: 320px; background: rgba(30, 41, 59, 0.35); padding: 15px; border-radius: 8px; border: 1px solid rgba(168, 85, 247, 0.3);">
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 2px solid #a855f7;">
+                                            <h4 style="margin: 0; color: #a855f7;">Right Motor (M2)</h4>
+                                            <div style="font-size: 0.8rem; font-family: monospace; display: flex; gap: 8px;">
+                                                <span>Target: <b id="disp-pid-target-r" style="color: #a855f7;">0</b></span>
+                                                <span>Actual: <b id="disp-pid-actual-r" style="color: #06b6d4;">0</b></span>
+                                                <span>Err: <b id="disp-pid-err-r" style="color: #cbd5e1;">0</b></span>
+                                            </div>
+                                        </div>
                                         <div class="form-row">
                                             <div class="form-group" style="flex: 1;">
                                                 <label>Kp</label>
@@ -804,7 +850,7 @@
                                                 <input type="number" id="set-pid-kd-r" step="0.1" min="0" max="500" value="0.0">
                                             </div>
                                         </div>
-                                        <div style="position: relative; height: 250px; width: 100%;">
+                                        <div style="position: relative; height: 260px; width: 100%; margin-top: 10px;">
                                             <canvas id="chart-motor-pid-r"></canvas>
                                         </div>
                                     </div>
@@ -1334,14 +1380,24 @@
                             </div>
 
                             <div class="settings-section">
-                                <h4>Battery Thresholds</h4>
+                                <h4>Battery Voltage Range & Thresholds</h4>
                                 <div class="form-row">
                                     <div class="form-group">
-                                        <label>Low Voltage (V)</label>
+                                        <label>Max Voltage (100%) (V)</label>
+                                        <input type="number" id="set-bat-max-v" step="0.1" placeholder="12.6">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Min Voltage (0%) (V)</label>
+                                        <input type="number" id="set-bat-min-v" step="0.1" placeholder="6.0">
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>Low Voltage Warning (V)</label>
                                         <input type="number" id="set-thresh-low-v" step="0.1" placeholder="10.8">
                                     </div>
                                     <div class="form-group">
-                                        <label>Critical Voltage (V)</label>
+                                        <label>Critical Voltage Warning (V)</label>
                                         <input type="number" id="set-thresh-crit-v" step="0.1" placeholder="10.2">
                                     </div>
                                 </div>
@@ -1365,43 +1421,33 @@
                         <!-- PANEL 3: SYSTEM & ACCESS POINT -->
                         <div class="settings-panel" id="settings-panel-system-ap">
                             <div class="settings-section">
-                                <h4>Wi-Fi Network Scanner & LAN Setup</h4>
-                                <div class="form-row">
-                                    <div class="form-group" style="flex: 1;">
-                                        <label>Available Nearby Wi-Fi Networks</label>
-                                        <div style="display: flex; gap: 8px;">
-                                            <select id="wifi-scan-select" class="form-control" style="flex: 1; padding: 8px; border-radius: 6px; background: var(--bg-card); color: var(--text-color); border: 1px solid var(--border-color);">
-                                                <option value="">-- Click Scan Networks --</option>
-                                            </select>
-                                            <button class="btn btn-secondary" id="btn-wifi-scan">🔍 SCAN</button>
-                                        </div>
+                                <h4>Dedicated High-Power Wi-Fi Hotspot (Full RF Power)</h4>
+                                <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px 16px; margin-bottom: 15px;">
+                                    <div style="font-weight: 600; color: #10b981; display: flex; align-items: center; gap: 8px;">
+                                        <span>⚡</span> High-Power AP Hotspot Active (19.5 dBm Max Power)
+                                    </div>
+                                    <div style="font-size: 0.85rem; color: var(--text-color); margin-top: 4px;">
+                                        Router (STA) connection is disabled. All hardware RF power and radio bandwidth are 100% dedicated to the AGV Hotspot for ultra-low latency and maximum range.
                                     </div>
                                 </div>
-                                <div class="form-row" style="margin-top: 12px;">
-                                    <div class="form-group">
-                                        <label>LAN Router SSID</label>
-                                        <input type="text" id="set-lan-ssid" value="Error - 404">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>LAN Router Password</label>
-                                        <input type="password" id="set-lan-pass" value="AsdfZxcv">
-                                    </div>
-                                </div>
-                                <div class="button-row" style="margin-top: 15px;">
-                                    <button class="btn btn-primary" id="btn-lan-save">CONNECT TO LAN ROUTER</button>
-                                </div>
-                            </div>
-
-                            <div class="settings-section">
-                                <h4>System AP Configuration</h4>
                                 <div class="form-row">
                                     <div class="form-group">
-                                        <label>AP Access SSID</label>
-                                        <input type="text" id="set-wifi-ssid" value="TARSLIFT_AGV">
+                                        <label>AP Hotspot SSID</label>
+                                        <input type="text" id="set-wifi-ssid" value="TARSLIFT_AGV" readonly style="opacity: 0.9;">
                                     </div>
                                     <div class="form-group">
-                                        <label>AP Password (Min 8 Characters)</label>
-                                        <input type="password" id="set-wifi-pass" value="12345678">
+                                        <label>AP Hotspot Password</label>
+                                        <input type="text" id="set-wifi-pass" value="12345678" readonly style="opacity: 0.9;">
+                                    </div>
+                                </div>
+                                <div class="form-row" style="margin-top: 10px;">
+                                    <div class="form-group">
+                                        <label>Static Access IP</label>
+                                        <input type="text" value="192.168.4.1" readonly style="opacity: 0.9;">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>RF Transmission Power</label>
+                                        <input type="text" value="19.5 dBm (MAXIMUM)" readonly style="opacity: 0.9; color: #10b981; font-weight: 600;">
                                     </div>
                                 </div>
                                 <div class="form-row" style="margin-top: 15px;">

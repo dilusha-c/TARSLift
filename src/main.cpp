@@ -15,7 +15,6 @@
 // Telemetry Broadcast Interval (ms)
 const unsigned long TELEMETRY_INTERVAL_MS = 200;
 static unsigned long lastTelemetryBroadcast = 0;
-static unsigned long lastWifiCheckTime = 0;
 
 static TaskHandle_t webTaskHandle = NULL;
 static TaskHandle_t realtimeTaskHandle = NULL;
@@ -42,7 +41,7 @@ void webTask(void *pvParameters) {
             broadcastTelemetry();
         }
 
-        // Update OLED display every 500ms
+        // Update OLED display every 500ms (Dedicated Hotspot 192.168.4.1)
         if (now - lastOledUpdate >= 500) {
             lastOledUpdate = now;
             TelemetryData tele = getTelemetry();
@@ -52,22 +51,8 @@ void webTask(void *pvParameters) {
             if (st == STATE_RUNNING) stStr = "RUN";
             else if (st == STATE_PAUSED) stStr = "PAUSE";
             else if (st == STATE_RECORDING) stStr = "REC";
-            bool wifiSTA = (WiFi.status() == WL_CONNECTED);
-            String wifiIP = wifiSTA ? WiFi.localIP().toString() : "";
-            oledUpdateLive(tele, mode, stStr, isStm32Connected(), wifiSTA, wifiIP, getWifiRSSI());
+            oledUpdateLive(tele, mode, stStr, isStm32Connected(), false, "192.168.4.1", getWifiRSSI());
         }
-
-        // Background LAN Wi-Fi STA Reconnect Monitor (Every 10 seconds)
-        if (now - lastWifiCheckTime >= 10000) {
-            lastWifiCheckTime = now;
-            if (strlen(sysSettings.wifi_ssid) > 0 && strcmp(sysSettings.wifi_ssid, "TARSLIFT_AGV") != 0 && WiFi.status() != WL_CONNECTED) {
-                webSerialPrint("WiFi STA: Background Reconnecting to LAN '");
-                webSerialPrint(sysSettings.wifi_ssid);
-                webSerialPrintln("'...");
-                WiFi.begin(sysSettings.wifi_ssid, sysSettings.wifi_password);
-            }
-        }
-
 
         // Cleanup dead/stale WebSocket clients
         cleanupWebSocketClients();
@@ -144,22 +129,11 @@ void realtimeTask(void *pvParameters) {
 #include "rfid/rfid_manager.h"
 
 void setup() {
-    // Initialize serial console
-    // Initialize serial console
+    // Initialize Hardware Serial
     Serial.begin(115200);
-    // For native USB, wait until the host opens the port
-    unsigned long waitStart = millis();
-    while (!Serial && (millis() - waitStart) < 3000) { delay(10); }
-    // After 3 s we continue even if the host hasn't opened the port
-    Serial.println("System ready - type /scan in Serial Monitor");
-    // Heartbeat ticker (optional)
-    static unsigned long lastHb = 0;
-    if (millis() - lastHb >= 5000) {
-        Serial.println("[HB] ESP32 alive");
-        lastHb = millis();
-    }
-
-    // Initialize OLED display and play boot sequence
+    delay(100);
+    
+    // Initialize OLED Display (Hardware I2C)
     oledInit();
     oledBootSequence();
 
@@ -167,17 +141,20 @@ void setup() {
     webSerialPrintln("TARSLIFT AGV - ESP32-S3 High-Level Controller");
     webSerialPrintln("==============================================");
 
-    // Initialize System and mounting filesystem
+    // Initialize System and mounting filesystem (loads settings + NVS)
     systemManagerInit();
     
     // Initialize Log structures
     errorLoggerInit();
 
-    // Start WiFi in AP + STA Dual Mode
-    webSerialPrintln("WiFi: Initializing Dual AP + STA Mode...");
-    WiFi.mode(WIFI_AP_STA);
+    // Start WiFi in Dedicated High-Power AP Hotspot Mode Only (Router STA disabled)
+    webSerialPrintln("WiFi: Initializing Dedicated High-Power AP Hotspot Mode (19.5 dBm)...");
+    WiFi.persistent(false);
+    WiFi.mode(WIFI_AP);
+    WiFi.setSleep(false); // Disable modem sleep for maximum noise immunity and fast response
+    WiFi.setTxPower(WIFI_POWER_19_5dBm); // Dedicated 100% Maximum RF Transmission Power
     
-    // 1. Configure AP Hotspot for ultra-low latency direct phone control (192.168.4.1)
+    // Configure AP Hotspot (192.168.4.1)
     if (WiFi.softAP("TARSLIFT_AGV", "12345678", 1, 0, 4)) {
         IPAddress apIP = WiFi.softAPIP();
         webSerialPrint("WiFi AP Hotspot: Active at ");
@@ -186,15 +163,6 @@ void setup() {
         webSerialPrintln("WiFi AP: Failed to start Access Point!");
         logError("SYSTEM", "E00", "Access Point Setup Failed");
     }
-
-    // 2. Connect to LAN Router simultaneously if SSID is configured
-    if (strlen(sysSettings.wifi_ssid) > 0 && strcmp(sysSettings.wifi_ssid, "TARSLIFT_AGV") != 0) {
-        webSerialPrint("WiFi STA: Connecting to LAN Router '");
-        webSerialPrint(sysSettings.wifi_ssid);
-        webSerialPrintln("'...");
-        WiFi.begin(sysSettings.wifi_ssid, sysSettings.wifi_password);
-    }
-
 
     // Initialize STM32 UART Link
     stm32UartInit();

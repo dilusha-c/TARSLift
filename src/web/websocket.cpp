@@ -50,19 +50,32 @@ static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsE
                 else if (doc["type"] == "update_tof_config") {
                     JsonObject d = doc["data"];
                     float stopDistanceMm = d["stop_distance_mm"] | 150.0f;
+                    sysSettings.tof_stop_distance_mm = stopDistanceMm;
+                    sysSettings.obstacle_detection = (stopDistanceMm > 0);
                     sendStm32TofConfig(stopDistanceMm);
-                    Serial.println("WebSocket: Sent ToF config to STM32");
+                    Serial.printf("WebSocket: Sent ToF stop distance %.1f mm to STM32\n", stopDistanceMm);
                 }
                 else if (doc["type"] == "update_target_rpm") {
                     JsonObject d = doc["data"];
-                    float targetRpm = d["rpm"] | 0.0f;
+                    float targetRpmL = 0.0f;
+                    float targetRpmR = 0.0f;
+                    if (d["rpmL"].is<float>() || d["rpmR"].is<float>()) {
+                        targetRpmL = d["rpmL"] | 0.0f;
+                        targetRpmR = d["rpmR"] | 0.0f;
+                    } else {
+                        float targetRpm = d["rpm"] | 0.0f;
+                        targetRpmL = targetRpm;
+                        targetRpmR = targetRpm;
+                    }
                     
                     // Convert RPM to mm/s
                     float circ = sysSettings.wheel_circ_mm > 0 ? sysSettings.wheel_circ_mm : 138.2f;
-                    int16_t speedMms = (int16_t)((targetRpm * circ) / 60.0f);
+                    int16_t speedMmsL = (int16_t)((targetRpmL * circ) / 60.0f);
+                    int16_t speedMmsR = (int16_t)((targetRpmR * circ) / 60.0f);
                     
-                    sendStm32SetSpeeds(speedMms, speedMms);
-                    Serial.printf("WebSocket: Sent target RPM %.1f (%.1f mm/s) to STM32\n", targetRpm, (float)speedMms);
+                    sendStm32SetSpeeds(speedMmsL, speedMmsR);
+                    setDemoTargetRpm(targetRpmL, targetRpmR);
+                    Serial.printf("WebSocket: Sent target RPM L:%.1f, R:%.1f (mm/s: %d, %d) to STM32\n", targetRpmL, targetRpmR, speedMmsL, speedMmsR);
                 }
             }
         }
@@ -144,19 +157,25 @@ void broadcastTelemetry() {
         doc["battery_status"] = "DISABLED";
     }
 
-    // ToF Sensors
+    // ToF Sensors & Obstacle Detection
     JsonObject tof = doc["tof"].to<JsonObject>();
     tof["left"] = tele.tof_left;
     tof["centre"] = tele.tof_centre;
     tof["right"] = tele.tof_right;
+    doc["obstacle_detected"] = isObstacleDetected();
+    doc["obstacle_stop_dist"] = sysSettings.tof_stop_distance_mm;
 
     // Motor Speeds
     JsonObject motor = doc["motor"].to<JsonObject>();
     motor["left_rpm"] = tele.left_rpm;
     motor["right_rpm"] = tele.right_rpm;
     motor["target_rpm"] = tele.target_rpm;
+    motor["target_l_rpm"] = tele.target_l_rpm;
+    motor["target_r_rpm"] = tele.target_r_rpm;
     doc["enc_l_rpm"] = tele.left_rpm;
     doc["enc_r_rpm"] = tele.right_rpm;
+    doc["target_l_rpm"] = tele.target_l_rpm;
+    doc["target_r_rpm"] = tele.target_r_rpm;
     doc["enc_l_mms"] = tele.left_mms;
     doc["enc_r_mms"] = tele.right_mms;
     doc["raw_enc_l"] = tele.raw_enc_l;
@@ -180,11 +199,11 @@ void broadcastTelemetry() {
     doc["heap"] = getFreeHeap();
     doc["rssi"] = getWifiRSSI();
 
-    // Dual IP Reporting
+    // Dedicated High-Power AP IP Reporting
     doc["ap_ip"] = WiFi.softAPIP().toString();
-    doc["sta_ip"] = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "Disconnected";
-    doc["sta_connected"] = (WiFi.status() == WL_CONNECTED);
-    doc["sta_ssid"] = sysSettings.wifi_ssid;
+    doc["sta_ip"] = "Disabled";
+    doc["sta_connected"] = false;
+    doc["sta_ssid"] = "";
 
     size_t fsTotal = 0, fsUsed = 0;
     getLittleFSInfo(fsTotal, fsUsed);

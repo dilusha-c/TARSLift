@@ -4,10 +4,7 @@
 
 namespace AGVCommand
 {
-    // =====================================================
-    // ESP32 -> STM32
-    // =====================================================
-
+    
     // Basic communication
     constexpr uint8_t PING             = 0x01;
     constexpr uint8_t GET_STATUS       = 0x02;

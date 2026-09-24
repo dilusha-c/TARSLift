@@ -354,11 +354,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef* huart)
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
     /* USART2 interrupt Init */
-    /* CRASH FIX 4: Priority 0 (highest) conflicts with SysTick (also priority 0).
-       During I2C blocking transfers in the main loop, if UART ISR fires at P=0,
-       SysTick cannot preempt it -> HAL_GetTick() freezes -> I2C timeout logic
-       never expires -> deadlock. Lower UART to priority 1. */
-    HAL_NVIC_SetPriority(USART2_IRQn, 1, 0);
+    HAL_NVIC_SetPriority(USART2_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(USART2_IRQn);
     /* USER CODE BEGIN USART2_MspInit 1 */
 
